@@ -1,123 +1,69 @@
-MiNegocio — Guía para desplegar en Vercel con dictado por voz vía Gemini
-==========================================================================
+Café Tierra Querida — Actualización: Supabase + roles + rebranding
+======================================================================
 
-Esta versión ya viene con:
-- La app compilada (bundle.js + styles.css) — no necesitas instalar nada
-  para verla localmente.
-- Una función serverless (api/parse-voz.js) que interpreta el dictado por
-  voz usando Gemini, de forma segura (la API key nunca llega al navegador).
+QUÉ CAMBIÓ EN ESTA VERSIÓN
+-----------------------
+- Nombre y logo aplicados: "Café Tierra Querida" en el encabezado, la
+  pantalla de inicio, el título de la pestaña del navegador y el ícono.
+- Pantalla de login: ya no se puede entrar sin usuario y contraseña.
+- Los datos ahora se guardan de VERDAD en una base de datos (Supabase):
+  productos, ventas, compras y gastos ya no se borran al recargar.
+- Dos roles:
+    - Empleado: puede registrar ventas, compras, gastos, ver inventario,
+      reportes y cuentas por cobrar/pagar (todo lo operativo).
+    - Administrador: además, puede eliminar gastos y entrar a una
+      pantalla de "Administración" (ícono de engranaje arriba a la
+      derecha) donde ve el equipo y puede ascender/quitar administradores.
+- Botón de cerrar sesión (ícono de salida, arriba a la derecha).
 
-Sigue estos pasos EN ORDEN.
+CÓMO SUBIR ESTOS CAMBIOS (ya tienes el repo conectado a Vercel)
+-----------------------
+Como ya hiciste todo el proceso de Git + GitHub + Vercel antes, ahora
+actualizar la app es mucho más simple:
 
+1. Reemplaza TODOS los archivos de tu carpeta local (la que ya tiene el
+   .git dentro, en Downloads\MiNegocio_App o donde la hayas dejado) por
+   los que vienen en este .zip. Es decir: sobrescribe index.html,
+   bundle.js, styles.css, agrega logo.png, y reemplaza los archivos
+   *.source.* — pero NO borres la carpeta .git que ya está ahí.
 
-PASO 1 — Consigue tu API key de Gemini (gratis)
---------------------------------------------------
-1. Entra a https://aistudio.google.com/app/apikey (inicia sesión con tu
-   cuenta de Google si te lo pide).
-2. Haz clic en "Create API key" (o "Crear clave de API").
-3. Selecciona o crea un proyecto de Google Cloud cuando te lo pida
-   (cualquier nombre sirve, por ejemplo "minegocio-app").
-4. Copia la clave que te genera (empieza algo así como "AIza...").
-   GUÁRDALA, la vas a necesitar en el paso 4. No la compartas ni la subas
-   a ningún repositorio público.
+2. Abre tu terminal en esa misma carpeta (la que ya tiene el historial de
+   Git) y ejecuta:
 
+   git add -A
+   git commit -m "Rebranding Cafe Tierra Querida + Supabase + roles"
+   git push
 
-PASO 2 — Instala Vercel CLI
---------------------------------------------------
-Necesitas tener Node.js instalado (si ya corriste algo con npm antes, ya
-lo tienes). En una terminal, ejecuta:
+3. Vercel detecta el nuevo push automáticamente y despliega la versión
+   actualizada en unos 20-30 segundos, en el mismo link de siempre.
 
-    npm install -g vercel
-
-Cuando termine, verifica que quedó instalado:
-
-    vercel --version
-
-
-PASO 3 — Entra a la carpeta del proyecto y despliega
---------------------------------------------------
-1. Descomprime este .zip en una carpeta.
-2. Abre una terminal DENTRO de esa carpeta (en Windows: shift + clic
-   derecho dentro de la carpeta > "Abrir ventana de PowerShell aquí"; en
-   Mac: clic derecho > "Nueva Terminal en la carpeta").
-3. Ejecuta:
-
-    vercel
-
-4. La primera vez te pedirá iniciar sesión (abre una pestaña del
-   navegador para loguearte con GitHub, GitLab, email o Google — elige la
-   que prefieras).
-5. Te hará algunas preguntas, para todas puedes darle simplemente Enter
-   para aceptar el valor por defecto:
-     - "Set up and deploy?"        → Enter (yes)
-     - "Which scope?"              → Enter (tu cuenta personal)
-     - "Link to existing project?" → Enter (no)
-     - "What's your project's name?" → Enter (o escribe "minegocio-app")
-     - "In which directory is your code located?" → Enter (usa "./")
-     - Si pregunta por framework  → elige "Other" / "None"
-6. Al terminar te da una URL de "Preview" (algo como
-   https://minegocio-app-xxxx.vercel.app). Aún no funcionará el dictado
-   por voz porque falta configurar la API key (siguiente paso).
-
-
-PASO 4 — Configura la API key en Vercel
---------------------------------------------------
-Opción A (recomendada, desde la terminal):
-
-    vercel env add GEMINI_API_KEY
-
-Te pedirá que pegues el valor (la key del Paso 1) y para qué entornos
-aplica — selecciona las tres opciones (Production, Preview, Development)
-con la barra espaciadora y luego Enter.
-
-Opción B (desde el navegador):
-1. Entra a https://vercel.com/dashboard y abre tu proyecto.
-2. Ve a Settings > Environment Variables.
-3. Agrega una variable con nombre GEMINI_API_KEY y como valor tu key.
-4. Guarda.
-
-
-PASO 5 — Vuelve a publicar para que tome la nueva variable
---------------------------------------------------
-Las variables de entorno solo se aplican en un despliegue nuevo. Ejecuta
-otra vez, desde la misma carpeta:
-
-    vercel --prod
-
-Esto te da la URL final de producción (sin la palabra "preview"). Ábrela,
-dale permiso al micrófono cuando el navegador lo pida, y prueba a decir
-algo como:
-
-    "vendí 5 café volcán a 31.460 en efectivo"
-
-Deberías ver "Interpretando con IA…" un instante y luego el formulario
-lleno automáticamente.
-
-
-SI ALGO FALLA
---------------------------------------------------
-- Si el micrófono no funciona: revisa que el navegador tenga permiso
-  (ícono de candado en la barra de direcciones > Permisos del sitio).
-- Si el dictado se transcribe pero el formulario no se llena: puede que
-  la variable GEMINI_API_KEY no haya quedado bien configurada, o que se
-  haya agotado la cuota gratuita de Gemini. La app cae automáticamente a
-  un análisis local más simple en ese caso, así que igual debería llenar
-  algo (aunque menos preciso).
-- Para ver los errores del servidor: en el dashboard de Vercel, entra a tu
-  proyecto > pestaña "Logs", ahí aparecen los errores de la función
-  api/parse-voz.js si algo sale mal.
-
+CREAR EMPLEADOS NUEVOS
+-----------------------
+1. Entra a tu proyecto en supabase.com → Authentication → Users
+2. Add user → Create new user (correo + contraseña, marca "Auto Confirm
+   User")
+3. Esa persona ya puede iniciar sesión en la app — queda automáticamente
+   como "empleado"
+4. Si quieres que sea administrador, entra a la app con tu cuenta de
+   administrador → ícono de engranaje (arriba a la derecha) →
+   "Administración" → "Hacer admin" al lado de su nombre
 
 QUÉ CONTIENE ESTE ZIP
---------------------------------------------------
-- index.html, bundle.js, styles.css → la app ya compilada, lista para
-  publicar.
-- api/parse-voz.js       → la función serverless que llama a Gemini.
-- .env.example           → referencia de qué variable de entorno se
-  necesita (no la subas con tu key real a ningún repositorio público).
-- app.source.jsx, icons.source.jsx, gemini.source.js, styles.source.css
-  → el código fuente legible, por si quieres editarlo más adelante.
-- package.json           → necesario para que Vercel reconozca la carpeta
-  como un proyecto.
+-----------------------
+- index.html, bundle.js, styles.css, logo.png → la app compilada y lista
+  para publicar (incluye Supabase, login y roles).
+- api/parse-voz.js       → función serverless que interpreta la voz con
+  Gemini (sin cambios respecto a la versión anterior).
+- app.source.jsx, icons.source.jsx, gemini.source.js,
+  supabaseClient.source.js, styles.source.css → código fuente legible,
+  por si quieres seguir editando.
+- package.json           → necesario para Vercel.
 
-¡Éxitos con la sustentación!
+NOTA SOBRE SEGURIDAD
+-----------------------
+La "publishable key" de Supabase que queda dentro de supabaseClient.source.js
+está diseñada para ser pública (por eso Supabase la llama así) — la
+protección real vive en las políticas de seguridad (Row Level Security)
+que configuramos directamente en la base de datos, no en ocultar esa key.
+
+¡Éxitos con Café Tierra Querida!

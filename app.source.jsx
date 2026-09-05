@@ -1,45 +1,12 @@
-import React, { useState, useRef, useMemo, useCallback } from "react";
+import React, { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import Icon from "./icons.jsx";
 import { interpretarConGemini } from "./gemini.js";
-
-// ---------- Datos iniciales (tomados del enunciado / Excel del examen) ----------
-const initialProducts = [
-  { id: 1, nombre: "Café Volcán en granos 250gr", stock: 50, costoProm: 11460, precioVenta: 31460 },
-  { id: 2, nombre: "Café Finca en grano 454gr", stock: 50, costoProm: 45780, precioVenta: 65780 },
-  { id: 3, nombre: "Café Mujeres Cafeteras en granos 454gr", stock: 50, costoProm: 45780, precioVenta: 65780 },
-  { id: 4, nombre: "Café Origen Nariño en granos 454gr", stock: 50, costoProm: 45780, precioVenta: 65780 },
-  { id: 5, nombre: "Café Colina en grano 454gr", stock: 50, costoProm: 36650, precioVenta: 56650 },
-];
+import { supabase } from "./supabaseClient.js";
+import logoUrl from "./assets/logo.png";
 
 const STOCK_MINIMO = 30;
 const FORMAS_PAGO = ["Efectivo", "Nequi", "Transferencia", "Tarjeta", "Crédito"];
-
-const initialGastos = [
-  { id: 1, descripcion: "Agua", valor: 100000, formaPago: "Nequi", pagado: true },
-  { id: 2, descripcion: "Luz", valor: 70000, formaPago: "Nequi", pagado: true },
-  { id: 3, descripcion: "Internet", valor: 150000, formaPago: "Nequi", pagado: true },
-  { id: 4, descripcion: "Nómina", valor: 2000000, formaPago: "Nequi", pagado: true },
-  { id: 5, descripcion: "Seguridad social", valor: 500000, formaPago: "Nequi", pagado: true },
-  { id: 6, descripcion: "Arriendo", valor: 2000000, formaPago: "Nequi", pagado: true },
-  { id: 7, descripcion: "Útiles de aseo", valor: 50000, formaPago: "Nequi", pagado: true },
-  { id: 8, descripcion: "Vigilancia", valor: 70000, formaPago: "Nequi", pagado: true },
-];
-
-const initialVentas = [
-  { id: 1, productoId: 1, cantidad: 50, precio: 31460, formaPago: "Efectivo", costoUnit: 11460, saldo: 0 },
-  { id: 2, productoId: 2, cantidad: 100, precio: 65780, formaPago: "Nequi", costoUnit: 45780, saldo: 0 },
-  { id: 3, productoId: 3, cantidad: 150, precio: 65780, formaPago: "Nequi", costoUnit: 45780, saldo: 0 },
-  { id: 4, productoId: 4, cantidad: 200, precio: 65780, formaPago: "Nequi", costoUnit: 45780, saldo: 0 },
-  { id: 5, productoId: 5, cantidad: 250, precio: 56650, formaPago: "Crédito", costoUnit: 36650, saldo: 250 * 56650 },
-];
-
-const initialCompras = [
-  { id: 1, productoId: 1, cantidad: 100, precio: 11460, formaPago: "Efectivo", saldo: 0 },
-  { id: 2, productoId: 2, cantidad: 150, precio: 45780, formaPago: "Nequi", saldo: 0 },
-  { id: 3, productoId: 3, cantidad: 200, precio: 45780, formaPago: "Nequi", saldo: 0 },
-  { id: 4, productoId: 4, cantidad: 250, precio: 45780, formaPago: "Crédito", saldo: 250 * 45780 },
-  { id: 5, productoId: 5, cantidad: 300, precio: 36650, formaPago: "Crédito", saldo: 300 * 36650 },
-];
+const GASTOS_CATALOGO = ["Agua", "Luz", "Internet", "Nómina", "Seguridad social", "Arriendo", "Útiles de aseo", "Vigilancia"];
 
 // ---------- utilidades ----------
 const money = (n) => "$" + Math.round(n || 0).toLocaleString("es-CO");
@@ -70,7 +37,6 @@ function detectarProducto(texto, productos) {
   }
   return mejor;
 }
-const GASTOS_CATALOGO = ["Agua", "Luz", "Internet", "Nómina", "Seguridad social", "Arriendo", "Útiles de aseo", "Vigilancia"];
 function detectarGasto(texto) {
   const t = normalizar(texto);
   return GASTOS_CATALOGO.find((g) => t.includes(normalizar(g).split(" ")[0])) || null;
@@ -133,51 +99,156 @@ function Campo({ label, children }) {
 }
 const inputCls = "w-full rounded-lg border border-[#e4d9c9] bg-white px-3 py-2 text-sm text-[#3b2a22] outline-none focus:border-[#8a6a4f]";
 
+// ---------- Login ----------
+function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+
+  const entrar = async (e) => {
+    e.preventDefault();
+    setCargando(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setCargando(false);
+    if (error) setError("Correo o contraseña incorrectos.");
+  };
+
+  return (
+    <div className="app-frame flex flex-col items-center justify-center px-8">
+      <img src={logoUrl} alt="Café Tierra Querida" className="mb-4 h-24 w-24 rounded-full object-cover shadow-sm" />
+      <p className="font-titulo mb-1 text-xl font-semibold text-[#3b2a22]">Café Tierra Querida</p>
+      <p className="mb-6 text-sm text-[#8a7f72]">Inicia sesión para continuar</p>
+      <form onSubmit={entrar} className="w-full max-w-xs">
+        <Campo label="Correo">
+          <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+        </Campo>
+        <Campo label="Contraseña">
+          <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+        </Campo>
+        {error && <p className="mb-3 text-xs text-[#a3452f]">{error}</p>}
+        <button type="submit" disabled={cargando} className="w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230] disabled:opacity-60">
+          {cargando ? "Entrando…" : "Entrar"}
+        </button>
+      </form>
+      <p className="mt-6 text-center text-xs text-[#8a7f72]">
+        ¿Eres empleado nuevo? Pídele a tu administrador que te cree una cuenta.
+      </p>
+    </div>
+  );
+}
+
 // ---------- App ----------
 function App() {
+  const [session, setSession] = useState(null);
+  const [cargandoSesion, setCargandoSesion] = useState(true);
+  const [perfil, setPerfil] = useState(null);
+
   const [pantalla, setPantalla] = useState("inicio");
-  const [productos, setProductos] = useState(initialProducts);
-  const [ventas, setVentas] = useState(initialVentas);
-  const [compras, setCompras] = useState(initialCompras);
-  const [gastos, setGastos] = useState(initialGastos);
+  const [productos, setProductos] = useState([]);
+  const [ventas, setVentas] = useState([]);
+  const [compras, setCompras] = useState([]);
+  const [gastos, setGastos] = useState([]);
+  const [empleados, setEmpleados] = useState([]);
   const [toast, setToast] = useState(null);
 
   const mostrarToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 2600); };
 
-  const registrarVenta = ({ productoId, cantidad, precio, formaPago }) => {
-    const prod = productos.find((p) => p.id === productoId);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setCargandoSesion(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const cargarTodo = useCallback(async () => {
+    const [{ data: prod }, { data: vt }, { data: cp }, { data: gs }] = await Promise.all([
+      supabase.from("productos").select("*").order("id"),
+      supabase.from("ventas").select("*").order("creado_en", { ascending: false }),
+      supabase.from("compras").select("*").order("creado_en", { ascending: false }),
+      supabase.from("gastos").select("*").order("creado_en", { ascending: false }),
+    ]);
+    setProductos((prod || []).map((p) => ({ id: Number(p.id), nombre: p.nombre, stock: p.stock, costoProm: Number(p.costo_prom), precioVenta: Number(p.precio_venta) })));
+    setVentas((vt || []).map((v) => ({ id: Number(v.id), productoId: Number(v.producto_id), cantidad: v.cantidad, precio: Number(v.precio), formaPago: v.forma_pago, costoUnit: Number(v.costo_unit), saldo: Number(v.saldo) })));
+    setCompras((cp || []).map((c) => ({ id: Number(c.id), productoId: Number(c.producto_id), cantidad: c.cantidad, precio: Number(c.precio), formaPago: c.forma_pago, saldo: Number(c.saldo) })));
+    setGastos((gs || []).map((g) => ({ id: Number(g.id), descripcion: g.descripcion, valor: Number(g.valor), formaPago: g.forma_pago, pagado: g.pagado })));
+  }, []);
+
+  const cargarEmpleados = useCallback(async () => {
+    const { data } = await supabase.from("profiles").select("id,nombre,rol").order("creado_en");
+    setEmpleados(data || []);
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setPerfil(null); return; }
+    (async () => {
+      const { data } = await supabase.from("profiles").select("nombre,rol").eq("id", session.user.id).single();
+      setPerfil(data || { nombre: session.user.email, rol: "empleado" });
+      await cargarTodo();
+    })();
+  }, [session, cargarTodo]);
+
+  useEffect(() => {
+    if (perfil?.rol === "administrador") cargarEmpleados();
+  }, [perfil, cargarEmpleados]);
+
+  if (cargandoSesion) {
+    return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando…</p></div>;
+  }
+  if (!session) return <Login />;
+  if (!perfil) {
+    return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando tu perfil…</p></div>;
+  }
+
+  const esAdmin = perfil.rol === "administrador";
+
+  const registrarVenta = async ({ productoId, cantidad, precio, formaPago }) => {
+    const prod = productos.find((p) => p.id === Number(productoId));
     if (!prod) return mostrarToast("Selecciona un producto válido", "error");
     if (cantidad <= 0 || precio <= 0) return mostrarToast("Cantidad y precio deben ser mayores a 0", "error");
     if (prod.stock < cantidad) return mostrarToast(`Stock insuficiente de ${prod.nombre} (disponible: ${prod.stock})`, "error");
-    setProductos((prev) => prev.map((p) => (p.id === productoId ? { ...p, stock: p.stock - cantidad } : p)));
-    setVentas((prev) => [{ id: Date.now(), productoId, cantidad, precio, formaPago, costoUnit: prod.costoProm, saldo: formaPago === "Crédito" ? cantidad * precio : 0 }, ...prev]);
+    const { error } = await supabase.from("ventas").insert({
+      producto_id: prod.id, cantidad, precio, forma_pago: formaPago, costo_unit: prod.costoProm,
+      saldo: formaPago === "Crédito" ? cantidad * precio : 0, creado_por: session.user.id,
+    });
+    if (error) return mostrarToast("No se pudo guardar la venta", "error");
+    await cargarTodo();
     mostrarToast(`Venta registrada: ${cantidad} × ${prod.nombre}`);
   };
 
-  const registrarCompra = ({ productoId, cantidad, precio, formaPago }) => {
-    const prod = productos.find((p) => p.id === productoId);
+  const registrarCompra = async ({ productoId, cantidad, precio, formaPago }) => {
+    const prod = productos.find((p) => p.id === Number(productoId));
     if (!prod) return mostrarToast("Selecciona un producto válido", "error");
     if (cantidad <= 0 || precio <= 0) return mostrarToast("Cantidad y precio deben ser mayores a 0", "error");
-    setProductos((prev) => prev.map((p) => {
-      if (p.id !== productoId) return p;
-      const nuevoStock = p.stock + cantidad;
-      const nuevoCosto = (p.stock * p.costoProm + cantidad * precio) / nuevoStock;
-      return { ...p, stock: nuevoStock, costoProm: Math.round(nuevoCosto) };
-    }));
-    setCompras((prev) => [{ id: Date.now(), productoId, cantidad, precio, formaPago, saldo: formaPago === "Crédito" ? cantidad * precio : 0 }, ...prev]);
+    const { error } = await supabase.from("compras").insert({
+      producto_id: prod.id, cantidad, precio, forma_pago: formaPago,
+      saldo: formaPago === "Crédito" ? cantidad * precio : 0, creado_por: session.user.id,
+    });
+    if (error) return mostrarToast("No se pudo guardar la compra", "error");
+    await cargarTodo();
     mostrarToast(`Compra registrada: ${cantidad} × ${prod.nombre}`);
   };
 
-  const registrarGasto = ({ descripcion, valor, formaPago }) => {
+  const registrarGasto = async ({ descripcion, valor, formaPago }) => {
     if (!descripcion) return mostrarToast("Escribe una descripción", "error");
     if (valor <= 0) return mostrarToast("El valor debe ser mayor a 0", "error");
-    setGastos((prev) => [{ id: Date.now(), descripcion, valor, formaPago, pagado: formaPago !== "Crédito" }, ...prev]);
+    const { error } = await supabase.from("gastos").insert({
+      descripcion, valor, forma_pago: formaPago, pagado: formaPago !== "Crédito", creado_por: session.user.id,
+    });
+    if (error) return mostrarToast("No se pudo guardar el gasto", "error");
+    await cargarTodo();
     mostrarToast(`Gasto registrado: ${descripcion}`);
   };
 
-  const pagarGasto = (id) => setGastos((prev) => prev.map((g) => (g.id === id ? { ...g, pagado: true } : g)));
-  const abonarVenta = (id, monto) => setVentas((prev) => prev.map((v) => (v.id === id ? { ...v, saldo: Math.max(0, v.saldo - monto) } : v)));
-  const pagarCompra = (id, monto) => setCompras((prev) => prev.map((c) => (c.id === id ? { ...c, saldo: Math.max(0, c.saldo - monto) } : c)));
+  const pagarGasto = async (id) => { await supabase.from("gastos").update({ pagado: true }).eq("id", id); await cargarTodo(); };
+  const abonarVenta = async (id) => { await supabase.from("ventas").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
+  const pagarCompra = async (id) => { await supabase.from("compras").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
+  const eliminarGasto = async (id) => { await supabase.from("gastos").delete().eq("id", id); await cargarTodo(); };
+  const cambiarRol = async (id, nuevoRol) => { await supabase.from("profiles").update({ rol: nuevoRol }).eq("id", id); await cargarEmpleados(); };
+  const cerrarSesion = async () => { await supabase.auth.signOut(); };
 
   const reportes = useMemo(() => {
     const totalVentas = ventas.reduce((s, v) => s + v.cantidad * v.precio, 0);
@@ -200,14 +271,15 @@ function App() {
 
   return (
     <div className="app-frame flex flex-col">
-      <Header pantalla={pantalla} />
+      <Header pantalla={pantalla} perfil={perfil} esAdmin={esAdmin} onAdmin={() => setPantalla("administracion")} onLogout={cerrarSesion} />
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
-        {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} />}
+        {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
         {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} />}
-        {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} />}
+        {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} onEliminar={esAdmin ? eliminarGasto : null} />}
         {pantalla === "inventario" && <Inventario productos={productos} />}
         {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
+        {pantalla === "administracion" && esAdmin && <Administracion empleados={empleados} onCambiarRol={cambiarRol} volver={() => setPantalla("inicio")} />}
       </main>
       <NavInferior pantalla={pantalla} ir={setPantalla} alertas={stockBajo.length} />
       {toast && (
@@ -219,11 +291,28 @@ function App() {
   );
 }
 
-const TITULOS = { inicio: "MiNegocio", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes" };
-function Header({ pantalla }) {
+const TITULOS = { inicio: "Inicio", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes", administracion: "Administración" };
+
+function Header({ pantalla, perfil, esAdmin, onAdmin, onLogout }) {
   return (
-    <header className="border-b border-[#e4d9c9] bg-[#faf6f0] px-4 py-4">
-      <p className="font-titulo text-lg font-semibold text-[#3b2a22]">{TITULOS[pantalla]}</p>
+    <header className="flex items-center justify-between border-b border-[#e4d9c9] bg-[#faf6f0] px-4 py-3">
+      <div className="flex items-center gap-2">
+        <img src={logoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+        <div>
+          <p className="font-titulo text-sm font-semibold leading-tight text-[#3b2a22]">Café Tierra Querida</p>
+          <p className="text-[10px] text-[#8a7f72]">{TITULOS[pantalla]}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        {esAdmin && (
+          <button onClick={onAdmin} className="rounded-full p-1.5 hover:bg-[#f0e9dd]" title="Administración">
+            <Icon name="settings" size={18} color="#6b4f3b" />
+          </button>
+        )}
+        <button onClick={onLogout} className="rounded-full p-1.5 hover:bg-[#f0e9dd]" title="Cerrar sesión">
+          <Icon name="logout" size={18} color="#6b4f3b" />
+        </button>
+      </div>
     </header>
   );
 }
@@ -251,7 +340,7 @@ function NavInferior({ pantalla, ir, alertas }) {
   );
 }
 
-function Inicio({ productos, stockBajo, ir }) {
+function Inicio({ productos, stockBajo, ir, perfil }) {
   const totalStock = productos.reduce((s, p) => s + p.stock, 0);
   const tiles = [
     { id: "ingresos", label: "Ingresos", icon: "arrow-down-circle", bg: "#eaf3de", fg: "#3b6d11" },
@@ -262,8 +351,11 @@ function Inicio({ productos, stockBajo, ir }) {
   ];
   return (
     <div>
-      <p className="mb-1 text-sm text-[#8a7f72]">Bienvenido</p>
-      <p className="font-titulo mb-5 text-xl font-semibold text-[#3b2a22]">Café Volcán &amp; Cía.</p>
+      <p className="mb-1 flex items-center gap-2 text-sm text-[#8a7f72]">
+        Hola, {perfil?.nombre || "bienvenido"}
+        {perfil?.rol === "administrador" && <span className="rounded-full bg-[#eeedfe] px-2 py-0.5 text-[10px] font-medium text-[#3c3489]">Administrador</span>}
+      </p>
+      <p className="font-titulo mb-5 text-xl font-semibold text-[#3b2a22]">Café Tierra Querida</p>
       <div className="mb-5 grid grid-cols-2 gap-3">
         <div className="rounded-xl bg-white p-3">
           <p className="text-xs text-[#8a7f72]">Unidades en stock</p>
@@ -294,8 +386,9 @@ function Ingresos({ productos, ventas, onRegistrar }) {
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
-
   const [interpretando, setInterpretando] = useState(false);
+
+  useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
   const procesarVoz = async (texto) => {
     setInterpretando(true);
@@ -357,8 +450,9 @@ function Compras({ productos, compras, onRegistrar }) {
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
-
   const [interpretando, setInterpretando] = useState(false);
+
+  useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
   const procesarVoz = async (texto) => {
     setInterpretando(true);
@@ -415,11 +509,10 @@ function Compras({ productos, compras, onRegistrar }) {
   );
 }
 
-function Gastos({ gastos, onRegistrar, onPagar }) {
+function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
   const [descripcion, setDescripcion] = useState("");
   const [valor, setValor] = useState("");
   const [formaPago, setFormaPago] = useState("Nequi");
-
   const [interpretando, setInterpretando] = useState(false);
 
   const procesarVoz = async (texto) => {
@@ -460,6 +553,7 @@ function Gastos({ gastos, onRegistrar, onPagar }) {
             <div className="flex items-center gap-2">
               <p className="font-medium text-[#854f0b]">{money(g.valor)}</p>
               {!g.pagado && <button onClick={() => onPagar(g.id)} className="rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]">Pagar</button>}
+              {onEliminar && <button onClick={() => onEliminar(g.id)} className="rounded-md border border-[#f3d5cb] px-2 py-1 text-xs text-[#a3452f]">Eliminar</button>}
             </div>
           </div>
         ))}
@@ -564,6 +658,35 @@ function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function Administracion({ empleados, onCambiarRol, volver }) {
+  return (
+    <div>
+      <button onClick={volver} className="mb-3 text-sm text-[#6b4f3b]">← Volver</button>
+      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Equipo</p>
+      <div className="space-y-2">
+        {empleados.map((e) => (
+          <div key={e.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
+            <div>
+              <p className="text-[#3b2a22]">{e.nombre}</p>
+              <p className="text-xs capitalize text-[#8a7f72]">{e.rol}</p>
+            </div>
+            <button
+              onClick={() => onCambiarRol(e.id, e.rol === "administrador" ? "empleado" : "administrador")}
+              className="rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]"
+            >
+              {e.rol === "administrador" ? "Quitar admin" : "Hacer admin"}
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-xs text-[#8a7f72]">
+        Para crear un nuevo empleado: ve al panel de Supabase → Authentication → Users → Add user,
+        con su correo y una contraseña. Queda automáticamente como empleado.
+      </p>
     </div>
   );
 }
