@@ -1,26 +1,14 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from "react";
-import Icon from "./icons.jsx";
+import Icon, { GoogleIcon } from "./icons.jsx";
 import { interpretarConGemini } from "./gemini.js";
 import { supabase } from "./supabaseClient.js";
 import logoUrl from "./assets/logo.png";
 
 const STOCK_MINIMO = 30;
+const DIAS_ALERTA_VENCIMIENTO = 15;
 const FORMAS_PAGO = ["Efectivo", "Nequi", "Transferencia", "Tarjeta", "Crédito"];
 const GASTOS_CATALOGO = ["Agua", "Luz", "Internet", "Nómina", "Seguridad social", "Arriendo", "Útiles de aseo", "Vigilancia"];
 const DIAS_SEMANA = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-function agruparUltimosDias(items, montoFn, dias = 7) {
-  const hoy = new Date();
-  const resultado = [];
-  for (let i = dias - 1; i >= 0; i--) {
-    const d = new Date(hoy);
-    d.setDate(d.getDate() - i);
-    const clave = d.toISOString().slice(0, 10);
-    const total = items.filter((it) => it.fecha && it.fecha.slice(0, 10) === clave).reduce((s, it) => s + montoFn(it), 0);
-    resultado.push({ label: DIAS_SEMANA[d.getDay()], total });
-  }
-  return resultado;
-}
 
 // ---------- utilidades ----------
 const money = (n) => "$" + Math.round(n || 0).toLocaleString("es-CO");
@@ -55,13 +43,44 @@ function detectarGasto(texto) {
   const t = normalizar(texto);
   return GASTOS_CATALOGO.find((g) => t.includes(normalizar(g).split(" ")[0])) || null;
 }
+function diasParaVencer(fechaStr) {
+  if (!fechaStr) return null;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const f = new Date(fechaStr + "T00:00:00");
+  return Math.round((f - hoy) / (1000 * 60 * 60 * 24));
+}
+function agruparUltimosDias(items, montoFn, dias = 7) {
+  const hoy = new Date();
+  const resultado = [];
+  for (let i = dias - 1; i >= 0; i--) {
+    const d = new Date(hoy); d.setDate(d.getDate() - i);
+    const clave = d.toISOString().slice(0, 10);
+    const total = items.filter((it) => it.fecha && it.fecha.slice(0, 10) === clave).reduce((s, it) => s + montoFn(it), 0);
+    resultado.push({ label: DIAS_SEMANA[d.getDay()], total });
+  }
+  return resultado;
+}
+function dentroDePeriodo(fechaStr, periodo) {
+  if (!fechaStr) return false;
+  const f = new Date(fechaStr);
+  const hoy = new Date();
+  if (periodo === "dia") return f.toDateString() === hoy.toDateString();
+  if (periodo === "semana") { const diffDias = (hoy - f) / (1000 * 60 * 60 * 24); return diffDias >= 0 && diffDias < 7; }
+  if (periodo === "mes") return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth();
+  return true;
+}
+function saludoPorHora() {
+  const h = new Date().getHours();
+  if (h < 12) return "Buenos días — hora de contar los granos";
+  if (h < 19) return "Buenas tardes — ¿cómo va la tienda hoy?";
+  return "Buenas noches — cerrando con buen aroma";
+}
 
 // ---------- Reconocimiento de voz ----------
 function useVoz(onTexto) {
   const [escuchando, setEscuchando] = useState(false);
   const [soportado] = useState(() => typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition));
   const recRef = useRef(null);
-
   const iniciar = useCallback(() => {
     if (!soportado) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -76,79 +95,176 @@ function useVoz(onTexto) {
     setEscuchando(true);
     rec.start();
   }, [soportado, onTexto]);
-
   return { escuchando, soportado, iniciar };
 }
 
-function CampoVoz({ placeholder, onTexto, interpretando }) {
-  const [ultimo, setUltimo] = useState("");
-  const { escuchando, soportado, iniciar } = useVoz((texto) => { setUltimo(texto); onTexto(texto); });
-  const estado = escuchando ? "escuchando" : interpretando ? "interpretando" : "listo";
+// ---------- Asistente de voz (barra oscura, real: STT navegador + Gemini) ----------
+function AsistenteVoz({ placeholder, onTexto }) {
+  const [fase, setFase] = useState("idle"); // idle | procesando | resultado
+  const [mensaje, setMensaje] = useState(placeholder);
+
+  const { escuchando, soportado, iniciar } = useVoz(async (texto) => {
+    setFase("procesando");
+    const resultado = await onTexto(texto);
+    setMensaje(resultado || "Listo");
+    setFase("resultado");
+    setTimeout(() => { setFase("idle"); setMensaje(placeholder); }, 2400);
+  });
+
+  const activo = escuchando || fase === "procesando";
+  const eyebrow = escuchando ? "Escuchando…" : fase === "procesando" ? "Analizando con IA…" : fase === "resultado" ? "Listo" : "Asistente de voz";
+  const texto = escuchando ? "Habla ahora" : fase === "procesando" ? "Un momento…" : mensaje;
+
   return (
-    <div className="mb-4">
+    <div>
       <button
+        type="button"
+        className={`assistant ${activo ? "listening" : ""} ${fase === "resultado" ? "result" : ""}`}
         onClick={iniciar}
-        disabled={!soportado || interpretando}
-        className={`w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${estado === "escuchando" ? "border-[#8a6a4f] bg-[#f4ece2] animate-pulse" : "border-[#e4d9c9] bg-white hover:bg-[#faf6f0]"} ${!soportado ? "opacity-50 cursor-not-allowed" : ""}`}
+        disabled={!soportado || fase === "procesando"}
       >
-        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${estado === "escuchando" ? "bg-[#8a6a4f] text-white" : "bg-[#efe4d6] text-[#6b4f3b]"}`}>
-          <Icon name="microphone" size={16} />
-        </span>
-        <span className="text-sm text-[#6b6259]">
-          {estado === "escuchando" ? "Escuchando…" : estado === "interpretando" ? "Interpretando con IA…" : ultimo || placeholder}
-        </span>
+        <div className="assistant-mic"><Icon name="mic" size={20} color={activo ? "#F7EEDF" : "#2A1810"} /></div>
+        <div className="assistant-body">
+          <p className="assistant-eyebrow">{eyebrow}</p>
+          <p className="assistant-text">{texto}</p>
+        </div>
+        <div className="waveform"><span></span><span></span><span></span><span></span><span></span></div>
+        <div className="assistant-result-icon"><Icon name="check" size={12} color="#F7EEDF" /></div>
       </button>
-      {!soportado && <p className="mt-1.5 text-xs text-[#a06a4a]">Este navegador no soporta dictado por voz — usa el formulario manual de abajo.</p>}
+      {!soportado && <p style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--cherry)" }}>Este navegador no soporta dictado por voz — usa el formulario manual de abajo.</p>}
     </div>
   );
 }
 
 function Campo({ label, children }) {
-  return (
-    <div className="mb-3">
-      <label className="mb-1 block text-xs font-medium text-[#8a7f72]">{label}</label>
-      {children}
-    </div>
-  );
+  return <div className="field"><label>{label}</label>{children}</div>;
 }
-const inputCls = "w-full rounded-lg border border-[#e4d9c9] bg-white px-3 py-2 text-sm text-[#3b2a22] outline-none focus:border-[#8a6a4f]";
 
-// ---------- Login ----------
+// ---------- Login (tabs, registro real, Google OAuth, animación de café) ----------
 function Login() {
+  const [tab, setTab] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [nombre, setNombre] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
+  const [overlay, setOverlay] = useState({ active: false, text: "" });
+
+  const mostrarOverlay = (texto) => setOverlay({ active: true, text: texto });
+  const actualizarOverlay = (texto) => setOverlay((o) => ({ ...o, text: texto }));
+  const ocultarOverlay = () => setOverlay({ active: false, text: "" });
 
   const entrar = async (e) => {
     e.preventDefault();
-    setCargando(true);
-    setError("");
+    setError(""); setCargando(true);
+    mostrarOverlay("Preparando tu café…");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setCargando(false);
-    if (error) setError("Correo o contraseña incorrectos.");
+    if (error) { ocultarOverlay(); setError("Correo o contraseña incorrectos."); return; }
+    actualizarOverlay("¡Listo! Bienvenido de nuevo.");
+    setTimeout(ocultarOverlay, 900);
+  };
+
+  const registrar = async (e) => {
+    e.preventDefault();
+    setError(""); setCargando(true);
+    mostrarOverlay("Preparando tu cuenta…");
+    const { data, error } = await supabase.auth.signUp({
+      email: regEmail, password: regPassword, options: { data: { nombre: nombre || regEmail } },
+    });
+    setCargando(false);
+    if (error) {
+      ocultarOverlay();
+      setError(error.message?.includes("already registered") ? "Ese correo ya tiene una cuenta." : "No se pudo crear la cuenta.");
+      return;
+    }
+    if (data.session) {
+      actualizarOverlay("¡Cuenta creada! Bienvenido al equipo.");
+      setTimeout(ocultarOverlay, 1100);
+    } else {
+      ocultarOverlay();
+      setError("¡Cuenta creada! Revisa tu correo para confirmarla antes de iniciar sesión.");
+      setTab("login");
+    }
+  };
+
+  const conGoogle = async () => {
+    setError("");
+    mostrarOverlay("Conectando con Google…");
+    const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+    if (error) { ocultarOverlay(); setError("No se pudo conectar con Google. Verifica que el proveedor esté configurado en Supabase."); }
   };
 
   return (
-    <div className="app-frame flex flex-col items-center justify-center px-8">
-      <img src={logoUrl} alt="Café Tierra Querida" className="mb-4 h-24 w-24 rounded-full object-cover shadow-sm" />
-      <p className="font-titulo mb-1 text-xl font-semibold text-[#3b2a22]">Café Tierra Querida</p>
-      <p className="mb-6 text-sm text-[#8a7f72]">Inicia sesión para continuar</p>
-      <form onSubmit={entrar} className="w-full max-w-xs">
-        <Campo label="Correo">
-          <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-        </Campo>
-        <Campo label="Contraseña">
-          <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
-        </Campo>
-        {error && <p className="mb-3 text-xs text-[#a3452f]">{error}</p>}
-        <button type="submit" disabled={cargando} className="w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230] disabled:opacity-60">
-          {cargando ? "Entrando…" : "Entrar"}
-        </button>
-      </form>
-      <p className="mt-6 text-center text-xs text-[#8a7f72]">
-        ¿Eres empleado nuevo? Pídele a tu administrador que te cree una cuenta.
-      </p>
+    <div className="login-stage">
+      <div className="login-wrap">
+        <div className="brand-panel">
+          <div>
+            <img src={logoUrl} alt="" className="badge" />
+            <h1 className="brand-name font-titulo">Café Tierra<br />Querida</h1>
+            <p className="brand-slogan font-titulo">"El dulce sabor de nuestra tierra"</p>
+          </div>
+          <div className="brand-bottom">
+            <strong>Portal de equipo</strong><br />
+            Acceso para colaboradores de la tienda.
+          </div>
+        </div>
+
+        <div className="form-panel">
+          <div className="form-inner">
+            <div className="tabs">
+              <button type="button" className={`tab-btn ${tab === "login" ? "active" : ""}`} onClick={() => { setTab("login"); setError(""); }}>Iniciar sesión</button>
+              <button type="button" className={`tab-btn ${tab === "register" ? "active" : ""}`} onClick={() => { setTab("register"); setError(""); }}>Registrarse</button>
+            </div>
+
+            {tab === "login" ? (
+              <>
+                <p className="form-eyebrow">Bienvenido de nuevo</p>
+                <h2 className="form-title font-titulo">Inicia sesión para continuar</h2>
+                <form onSubmit={entrar}>
+                  <Campo label="Correo"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" /></Campo>
+                  <Campo label="Contraseña"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" /></Campo>
+                  {error && <p className="login-error">{error}</p>}
+                  <button className="submit-btn" type="submit" disabled={cargando}>Entrar</button>
+                </form>
+                <div className="divider"><span>o</span></div>
+                <button type="button" className="google-btn" onClick={conGoogle} disabled={cargando}><GoogleIcon /> Continuar con Google</button>
+                <p className="switch-text">¿Eres empleado nuevo? <a onClick={() => setTab("register")}>Regístrate aquí</a></p>
+              </>
+            ) : (
+              <>
+                <p className="form-eyebrow">Únete al equipo</p>
+                <h2 className="form-title font-titulo">Crea tu cuenta</h2>
+                <form onSubmit={registrar}>
+                  <Campo label="Nombre completo"><input value={nombre} onChange={(e) => setNombre(e.target.value)} required /></Campo>
+                  <Campo label="Correo"><input type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} required autoComplete="email" /></Campo>
+                  <Campo label="Contraseña"><input type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} required minLength={6} autoComplete="new-password" /></Campo>
+                  {error && <p className="login-error">{error}</p>}
+                  <button className="submit-btn" type="submit" disabled={cargando}>Crear cuenta</button>
+                </form>
+                <div className="divider"><span>o</span></div>
+                <button type="button" className="google-btn" onClick={conGoogle} disabled={cargando}><GoogleIcon /> Continuar con Google</button>
+                <p className="switch-text">¿Ya tienes cuenta? <a onClick={() => setTab("login")}>Inicia sesión</a></p>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className={`loading-overlay ${overlay.active ? "active" : ""}`}>
+        <svg viewBox="0 0 104 104" width="88" height="88">
+          <path className="steam-line s1" d="M40 26 Q36 18 41 10" />
+          <path className="steam-line s2" d="M52 26 Q48 18 53 10" />
+          <path className="steam-line s3" d="M64 26 Q60 18 65 10" />
+          <defs><clipPath id="cupClip"><path d="M26 34 H70 L65 82 Q64 92 52 92 H44 Q32 92 31 82 Z" /></clipPath></defs>
+          <path d="M26 34 H70 L65 82 Q64 92 52 92 H44 Q32 92 31 82 Z" fill="none" stroke="#F7EEDF" strokeWidth="3.5" />
+          <path d="M70 40 Q88 40 88 55 Q88 70 70 68" fill="none" stroke="#F7EEDF" strokeWidth="3.5" />
+          <g clipPath="url(#cupClip)"><rect className="coffee-fill" x="24" y="34" width="52" height="60" fill="#C6862F" /></g>
+        </svg>
+        <p className="loading-text">{overlay.text}</p>
+      </div>
     </div>
   );
 }
@@ -169,10 +285,7 @@ function App() {
   const mostrarToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 2600); };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setCargandoSesion(false);
-    });
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setCargandoSesion(false); });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -199,17 +312,12 @@ function App() {
     })();
   }, [session, cargarTodo]);
 
-  // Este cálculo debe declararse SIEMPRE en el mismo orden, antes de cualquier
-  // "return" condicional de abajo — es una regla de los Hooks de React.
+  // Cálculos derivados — SIEMPRE antes de cualquier return condicional (regla de los Hooks)
   const reportes = useMemo(() => {
     const totalVentas = ventas.reduce((s, v) => s + v.cantidad * v.precio, 0);
     const totalCosto = ventas.reduce((s, v) => s + v.cantidad * v.costoUnit, 0);
     const totalGastos = gastos.reduce((s, g) => s + g.valor, 0);
     const utilidad = totalVentas - totalCosto - totalGastos;
-    const efectivoVentas = ventas.filter((v) => v.formaPago === "Efectivo").reduce((s, v) => s + v.cantidad * v.precio, 0);
-    const efectivoCompras = compras.filter((c) => c.formaPago === "Efectivo").reduce((s, c) => s + c.cantidad * c.precio, 0);
-    const efectivoGastos = gastos.filter((g) => g.formaPago === "Efectivo").reduce((s, g) => s + g.valor, 0);
-    const caja = efectivoVentas - efectivoCompras - efectivoGastos;
     const cuentasPorCobrar = ventas.filter((v) => v.saldo > 0);
     const cuentasPorPagar = [
       ...compras.filter((c) => c.saldo > 0).map((c) => ({ ...c, tipo: "Compra" })),
@@ -220,16 +328,14 @@ function App() {
       compras: agruparUltimosDias(compras, (c) => c.cantidad * c.precio),
       gastos: agruparUltimosDias(gastos, (g) => g.valor),
     };
-    return { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar, semana };
+    return { totalVentas, totalCosto, totalGastos, utilidad, cuentasPorCobrar, cuentasPorPagar, semana };
   }, [ventas, compras, gastos]);
 
-  if (cargandoSesion) {
-    return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando…</p></div>;
-  }
+  const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
+
+  if (cargandoSesion) return <div className="login-stage" style={{ alignItems: "center", justifyContent: "center" }}><p style={{ color: "var(--cream)" }}>Cargando…</p></div>;
   if (!session) return <Login />;
-  if (!perfil) {
-    return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando tu perfil…</p></div>;
-  }
+  if (!perfil) return <div className="login-stage" style={{ alignItems: "center", justifyContent: "center" }}><p style={{ color: "var(--cream)" }}>Cargando tu perfil…</p></div>;
 
   const registrarVenta = async ({ productoId, cantidad, precio, formaPago }) => {
     const prod = productos.find((p) => p.id === Number(productoId));
@@ -262,9 +368,7 @@ function App() {
   const registrarGasto = async ({ descripcion, valor, formaPago }) => {
     if (!descripcion) return mostrarToast("Escribe una descripción", "error");
     if (valor <= 0) return mostrarToast("El valor debe ser mayor a 0", "error");
-    const { error } = await supabase.from("gastos").insert({
-      descripcion, valor, forma_pago: formaPago, pagado: formaPago !== "Crédito", creado_por: session.user.id,
-    });
+    const { error } = await supabase.from("gastos").insert({ descripcion, valor, forma_pago: formaPago, pagado: formaPago !== "Crédito", creado_por: session.user.id });
     if (error) return mostrarToast("No se pudo guardar el gasto", "error");
     await cargarTodo();
     mostrarToast(`Gasto registrado: ${descripcion}`);
@@ -278,10 +382,7 @@ function App() {
 
   const agregarProducto = async ({ nombre, stock, costoProm, precioVenta, fechaVencimiento }) => {
     if (!nombre) return mostrarToast("Escribe un nombre de producto", "error");
-    const { error } = await supabase.from("productos").insert({
-      nombre, stock: Number(stock) || 0, costo_prom: Number(costoProm) || 0, precio_venta: Number(precioVenta) || 0,
-      fecha_vencimiento: fechaVencimiento || null,
-    });
+    const { error } = await supabase.from("productos").insert({ nombre, stock: Number(stock) || 0, costo_prom: Number(costoProm) || 0, precio_venta: Number(precioVenta) || 0, fecha_vencimiento: fechaVencimiento || null });
     if (error) return mostrarToast("No se pudo agregar el producto", "error");
     await cargarTodo();
     mostrarToast(`Producto agregado: ${nombre}`);
@@ -300,12 +401,10 @@ function App() {
     mostrarToast(`${prod.nombre} actualizado.`);
   };
 
-  const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
-
   return (
-    <div className="app-frame flex flex-col">
-      <Header pantalla={pantalla} perfil={perfil} onLogout={cerrarSesion} />
-      <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
+    <div className="phone">
+      <Header pantalla={pantalla} onLogout={cerrarSesion} />
+      <main className="content">
         {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
         {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} />}
@@ -315,7 +414,7 @@ function App() {
       </main>
       <NavInferior pantalla={pantalla} ir={setPantalla} alertas={stockBajo.length} />
       {toast && (
-        <div className={`toast-anim fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-lg px-4 py-2.5 text-sm text-white shadow-lg ${toast.tipo === "error" ? "bg-[#a3452f]" : "bg-[#3b6d11]"}`} style={{ maxWidth: "90%" }}>
+        <div className="toast-anim" style={{ position: "absolute", bottom: 88, left: "50%", transform: "translateX(-50%)", maxWidth: "90%", padding: "10px 16px", borderRadius: 10, color: "#fff", fontSize: "0.85rem", zIndex: 40, background: toast.tipo === "error" ? "var(--cherry)" : "var(--pine)" }}>
           {toast.msg}
         </div>
       )}
@@ -323,228 +422,223 @@ function App() {
   );
 }
 
-const TITULOS = { inicio: "Inicio", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes" };
+const TITULOS = { inicio: "Panel principal", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes" };
 
-function Header({ pantalla, perfil, onLogout }) {
+function Header({ pantalla, onLogout }) {
   return (
-    <header className="flex items-center justify-between border-b border-[#e4d9c9] bg-[#faf6f0] px-4 py-3">
-      <div className="flex items-center gap-2">
-        <img src={logoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
-        <div>
-          <p className="font-titulo text-sm font-semibold leading-tight text-[#3b2a22]">Café Tierra Querida</p>
-          <p className="text-[10px] text-[#8a7f72]">{TITULOS[pantalla]}</p>
-        </div>
+    <div className="header">
+      <img className="badge" src={logoUrl} alt="Café Tierra Querida" />
+      <div className="titles">
+        <p className="brand font-titulo">Café Tierra Querida</p>
+        <p className="sub">{TITULOS[pantalla]}</p>
       </div>
-      <div className="flex items-center gap-1">
-        <button onClick={onLogout} className="rounded-full p-1.5 hover:bg-[#f0e9dd]" title="Cerrar sesión">
-          <Icon name="logout" size={18} color="#6b4f3b" />
-        </button>
-      </div>
-    </header>
+      <button className="logout-btn" onClick={onLogout} aria-label="Cerrar sesión">
+        <Icon name="logout" size={18} color="var(--espresso-700)" />
+      </button>
+    </div>
   );
 }
 
 function NavInferior({ pantalla, ir, alertas }) {
   const items = [
     { id: "inicio", icon: "home", label: "Inicio" },
-    { id: "ingresos", icon: "arrow-down-circle", label: "Ingresos" },
+    { id: "ingresos", icon: "arrowDown", label: "Ingresos" },
     { id: "inventario", icon: "package", label: "Inventario", badge: alertas },
-    { id: "reportes", icon: "chart-bar", label: "Reportes" },
+    { id: "reportes", icon: "bars", label: "Reportes" },
   ];
   return (
-    <nav className="absolute bottom-0 left-0 flex w-full justify-around border-t border-[#e4d9c9] bg-white py-2">
+    <div className="bottom-nav">
       {items.map((it) => {
         const activo = pantalla === it.id;
         return (
-          <button key={it.id} onClick={() => ir(it.id)} className="relative flex flex-col items-center gap-1 px-3 py-1">
-            <Icon name={it.icon} size={20} color={activo ? "#6b4f3b" : "#b3a898"} />
-            {it.badge > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#a3452f] text-[9px] text-white">{it.badge}</span>}
-            <span className={`text-[10px] ${activo ? "text-[#6b4f3b]" : "text-[#b3a898]"}`}>{it.label}</span>
+          <button key={it.id} type="button" className={`nav-btn ${activo ? "active" : ""}`} onClick={() => ir(it.id)} style={{ position: "relative" }}>
+            <Icon name={it.icon} size={20} color={activo ? "var(--espresso-900)" : "var(--espresso-600)"} />
+            {it.badge > 0 && <span style={{ position: "absolute", top: 2, right: "26%", width: 16, height: 16, borderRadius: "50%", background: "var(--cherry)", color: "#fff", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{it.badge}</span>}
+            <span>{it.label}</span>
           </button>
         );
       })}
-    </nav>
+    </div>
   );
 }
 
 function Inicio({ productos, stockBajo, ir, perfil }) {
   const totalStock = productos.reduce((s, p) => s + p.stock, 0);
   const tiles = [
-    { id: "ingresos", label: "Ingresos", icon: "arrow-down-circle", bg: "#eaf3de", fg: "#3b6d11" },
-    { id: "compras", label: "Compras", icon: "shopping-cart", bg: "#faece7", fg: "#993c1d" },
-    { id: "gastos", label: "Gastos", icon: "receipt", bg: "#faeeda", fg: "#854f0b" },
-    { id: "inventario", label: "Inventario", icon: "package", bg: "#eeedfe", fg: "#3c3489" },
-    { id: "reportes", label: "Reportes", icon: "chart-bar", bg: "#e6f1fb", fg: "#185fa5" },
+    { id: "ingresos", label: "Ingresos", icon: "arrowDown", clase: "ingresos" },
+    { id: "compras", label: "Compras", icon: "cart", clase: "compras" },
+    { id: "gastos", label: "Gastos", icon: "receipt", clase: "gastos" },
+    { id: "inventario", label: "Inventario", icon: "package", clase: "inventario" },
+    { id: "reportes", label: "Reportes", icon: "bars", clase: "reportes" },
   ];
+
+  const procesarConsulta = async (texto) => {
+    const t = normalizar(texto);
+    await new Promise((r) => setTimeout(r, 350));
+    if (t.includes("stock") || t.includes("inventario")) return `Tienes ${totalStock} unidades en inventario.`;
+    if (t.includes("alerta")) return `${stockBajo.length} producto(s) con stock bajo.`;
+    if (t.includes("ganancia") || t.includes("utilidad")) return "Entra a Reportes para ver tu utilidad actual.";
+    return "Puedo ayudarte con ventas, compras, gastos, inventario o reportes.";
+  };
+
   return (
     <div>
-      <p className="mb-1 text-sm text-[#8a7f72]">Hola, {perfil?.nombre || "bienvenido"}</p>
-      <p className="font-titulo mb-5 text-xl font-semibold text-[#3b2a22]">Café Tierra Querida</p>
-      <div className="mb-5 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-white p-3">
-          <p className="text-xs text-[#8a7f72]">Unidades en stock</p>
-          <p className="text-lg font-semibold text-[#3b2a22]">{totalStock}</p>
-        </div>
-        <div className="rounded-xl bg-white p-3">
-          <p className="text-xs text-[#8a7f72]">Alertas de stock</p>
-          <p className={`text-lg font-semibold ${stockBajo.length ? "text-[#a3452f]" : "text-[#3b2a22]"}`}>{stockBajo.length}</p>
-        </div>
+      <p style={{ fontSize: "0.86rem", color: "var(--espresso-600)", margin: "0 0 4px" }}>
+        Hola, <strong style={{ color: "var(--espresso-900)" }}>{perfil?.nombre || "bienvenido"}</strong>
+      </p>
+      <h1 className="font-titulo" style={{ fontWeight: 600, fontStyle: "italic", fontSize: "1.35rem", margin: "0 0 18px", color: "var(--espresso-900)", lineHeight: 1.25 }}>{saludoPorHora()}</h1>
+
+      <div className="stats">
+        <div className="stat-card"><p className="stat-label">Unidades en stock</p><p className="stat-value">{totalStock}</p></div>
+        <div className="stat-card"><p className="stat-label">Alertas de stock</p><p className="stat-value" style={{ color: stockBajo.length ? "var(--cherry)" : "var(--espresso-900)" }}>{stockBajo.length}</p></div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+
+      <div className="modules" style={{ marginBottom: 18 }}>
         {tiles.map((t) => (
-          <button key={t.id} onClick={() => ir(t.id)} className="flex flex-col items-center justify-center gap-2 rounded-xl py-6 text-sm font-medium" style={{ backgroundColor: t.bg, color: t.fg }}>
-            <Icon name={t.icon} size={24} />
-            {t.label}
+          <button key={t.id} type="button" className={`mod-card ${t.clase}`} onClick={() => ir(t.id)}>
+            <div className="mod-icon-wrap"><Icon name={t.icon} size={21} color="currentColor" /></div>
+            <span className="mod-label">{t.label}</span>
           </button>
         ))}
-        <div className="flex items-center justify-center rounded-xl border border-dashed border-[#d8cbb8] p-3 text-center text-xs text-[#8a7f72]">
-          Mantén presionado el micrófono en cada módulo para dictar
-        </div>
       </div>
+
+      <AsistenteVoz placeholder="Toca y dime qué necesitas registrar o consultar" onTexto={procesarConsulta} />
     </div>
   );
 }
 
 function Ingresos({ productos, ventas, onRegistrar }) {
-  const COLOR = "#3b6d11";
-  const COLOR_BG = "#eaf3de";
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
-  const [interpretando, setInterpretando] = useState(false);
+  const [llenado, setLlenado] = useState({});
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
   const procesarVoz = async (texto) => {
-    setInterpretando(true);
     const resultado = await interpretarConGemini(texto, "ingreso", productos);
-    setInterpretando(false);
-
     const nums = extraerNumeros(texto);
     const prodLocal = detectarProducto(texto, productos);
     const pagoLocal = detectarFormaPago(texto);
-
     const prod = (resultado?.producto && productos.find((p) => normalizar(p.nombre).includes(normalizar(resultado.producto)))) || prodLocal;
     const cant = resultado?.cantidad ?? nums[0];
     const prec = resultado?.precio ?? nums[1] ?? (prod ? prod.precioVenta : undefined);
     const pago = resultado?.formaPago ?? pagoLocal;
-
-    if (prod) setProductoId(prod.id);
-    if (cant) setCantidad(String(cant));
-    if (prec) setPrecio(String(prec));
-    if (pago) setFormaPago(pago);
+    const flags = {};
+    if (prod) { setProductoId(prod.id); flags.producto = true; }
+    if (cant) { setCantidad(String(cant)); flags.cantidad = true; }
+    if (prec) { setPrecio(String(prec)); flags.precio = true; }
+    if (pago) { setFormaPago(pago); flags.pago = true; }
+    setLlenado((prev) => ({ ...prev, ...flags }));
+    if (cant && prec) return `Formulario listo · Total: ${money(cant * prec)}`;
+    return "Formulario actualizado";
   };
-  const guardar = () => { onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago }); setCantidad(""); setPrecio(""); };
+
+  const guardar = () => {
+    onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago });
+    setCantidad(""); setPrecio(""); setLlenado({});
+  };
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: COLOR_BG, color: COLOR }}>
-        <Icon name="arrow-down-circle" size={14} />
-        Dinero que entra al negocio — cada venta suma a tu caja y descuenta del inventario
-      </div>
-      <CampoVoz placeholder='Ej: "vendí 5 café volcán a 31.460 en efectivo"' onTexto={procesarVoz} interpretando={interpretando} />
-      <div className="rounded-xl border-t-4 bg-white p-4" style={{ borderColor: COLOR }}>
+      <div className="info-banner pine"><Icon name="arrowDown" size={18} color="var(--pine)" /><span>Dinero que entra al negocio — cada venta suma a tu caja y descuenta del inventario</span></div>
+      <AsistenteVoz placeholder='Ej: "vendí 5 café volcán a 31.460 en efectivo"' onTexto={procesarVoz} />
+      <div className="form-card">
         <Campo label="Producto">
-          <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+          <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
             {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Campo>
-        <div className="flex gap-3">
-          <div className="flex-1"><Campo label="Cantidad"><input className={inputCls} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo></div>
-          <div className="flex-1"><Campo label="Precio unitario"><input className={inputCls} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo></div>
+        <div className="field-row">
+          <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
+          <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
         </div>
         <Campo label="Forma de pago">
-          <select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
+          <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
         </Campo>
-        <button onClick={guardar} className="mt-1 w-full rounded-lg py-2.5 text-sm font-medium text-white" style={{ background: COLOR }}>Guardar venta</button>
+        <button type="button" className="submit-btn" style={{ marginTop: 6 }} onClick={guardar}>Guardar venta</button>
       </div>
-      <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Ventas recientes</p>
-      <div className="space-y-2">
-        {ventas.slice(0, 6).map((v) => {
-          const prod = productos.find((p) => p.id === v.productoId);
-          return (
-            <div key={v.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
-              <div><p className="text-[#3b2a22]">{prod?.nombre}</p><p className="text-xs text-[#8a7f72]">{v.cantidad} u · {v.formaPago}</p></div>
-              <p className="font-medium" style={{ color: COLOR }}>+{money(v.cantidad * v.precio)}</p>
-            </div>
-          );
-        })}
-        {ventas.length === 0 && <p className="text-xs text-[#8a7f72]">Aún no has registrado ninguna venta.</p>}
-      </div>
+      <p className="list-title">Ventas recientes</p>
+      {ventas.length === 0 && <p className="list-empty">Aún no has registrado ninguna venta.</p>}
+      {ventas.slice(0, 6).map((v) => {
+        const prod = productos.find((p) => p.id === v.productoId);
+        return (
+          <div key={v.id} className="list-row">
+            <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{v.cantidad} u · {v.formaPago}</div></div>
+            <div className="li-amount" style={{ color: "var(--pine)" }}>+{money(v.cantidad * v.precio)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function Compras({ productos, compras, onRegistrar }) {
-  const COLOR = "#993c1d";
-  const COLOR_BG = "#faece7";
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
   const [vencimiento, setVencimiento] = useState("");
-  const [interpretando, setInterpretando] = useState(false);
+  const [llenado, setLlenado] = useState({});
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
   const procesarVoz = async (texto) => {
-    setInterpretando(true);
     const resultado = await interpretarConGemini(texto, "compra", productos);
-    setInterpretando(false);
-
     const nums = extraerNumeros(texto);
     const prodLocal = detectarProducto(texto, productos);
     const pagoLocal = detectarFormaPago(texto);
-
     const prod = (resultado?.producto && productos.find((p) => normalizar(p.nombre).includes(normalizar(resultado.producto)))) || prodLocal;
     const cant = resultado?.cantidad ?? nums[0];
     const prec = resultado?.precio ?? nums[1];
     const pago = resultado?.formaPago ?? pagoLocal;
-
-    if (prod) setProductoId(prod.id);
-    if (cant) setCantidad(String(cant));
-    if (prec) setPrecio(String(prec));
-    if (pago) setFormaPago(pago);
+    const flags = {};
+    if (prod) { setProductoId(prod.id); flags.producto = true; }
+    if (cant) { setCantidad(String(cant)); flags.cantidad = true; }
+    if (prec) { setPrecio(String(prec)); flags.precio = true; }
+    if (pago) { setFormaPago(pago); flags.pago = true; }
+    setLlenado((prev) => ({ ...prev, ...flags }));
+    if (cant && prec) return `Formulario listo · Total: ${money(cant * prec)}`;
+    return "Formulario actualizado";
   };
-  const guardar = () => { onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago, fechaVencimiento: vencimiento || null }); setCantidad(""); setPrecio(""); setVencimiento(""); };
+
+  const guardar = () => {
+    onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago, fechaVencimiento: vencimiento || null });
+    setCantidad(""); setPrecio(""); setVencimiento(""); setLlenado({});
+  };
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: COLOR_BG, color: COLOR }}>
-        <Icon name="shopping-cart" size={14} />
-        Dinero que sale del negocio — cada compra suma al inventario para poder vender
-      </div>
-      <CampoVoz placeholder='Ej: "compré 100 café volcán a 11.460 en efectivo"' onTexto={procesarVoz} interpretando={interpretando} />
-      <div className="rounded-xl border-t-4 bg-white p-4" style={{ borderColor: COLOR }}>
+      <div className="info-banner cherry"><Icon name="cart" size={18} color="var(--cherry)" /><span>Dinero que sale del negocio — cada compra suma al inventario para poder vender</span></div>
+      <AsistenteVoz placeholder='Ej: "compré 100 café volcán a 11.460 en efectivo"' onTexto={procesarVoz} />
+      <div className="form-card cherry">
         <Campo label="Producto">
-          <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+          <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
             {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Campo>
-        <div className="flex gap-3">
-          <div className="flex-1"><Campo label="Cantidad"><input className={inputCls} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo></div>
-          <div className="flex-1"><Campo label="Precio unitario"><input className={inputCls} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo></div>
+        <div className="field-row">
+          <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
+          <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
         </div>
         <Campo label="Forma de pago">
-          <select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
+          <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
         </Campo>
-        <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
-        <button onClick={guardar} className="mt-1 w-full rounded-lg py-2.5 text-sm font-medium text-white" style={{ background: COLOR }}>Guardar compra</button>
+        <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
+        <button type="button" className="submit-btn cherry" style={{ marginTop: 6 }} onClick={guardar}>Guardar compra</button>
       </div>
-      <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Compras recientes</p>
-      <div className="space-y-2">
-        {compras.slice(0, 6).map((c) => {
-          const prod = productos.find((p) => p.id === c.productoId);
-          return (
-            <div key={c.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
-              <div><p className="text-[#3b2a22]">{prod?.nombre}</p><p className="text-xs text-[#8a7f72]">{c.cantidad} u · {c.formaPago}{c.saldo > 0 ? " · pendiente" : ""}</p></div>
-              <p className="font-medium" style={{ color: COLOR }}>-{money(c.cantidad * c.precio)}</p>
-            </div>
-          );
-        })}
-        {compras.length === 0 && <p className="text-xs text-[#8a7f72]">Aún no has registrado ninguna compra.</p>}
-      </div>
+      <p className="list-title">Compras recientes</p>
+      {compras.length === 0 && <p className="list-empty">Aún no has registrado ninguna compra.</p>}
+      {compras.slice(0, 6).map((c) => {
+        const prod = productos.find((p) => p.id === c.productoId);
+        return (
+          <div key={c.id} className="list-row">
+            <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{c.cantidad} u · {c.formaPago}{c.saldo > 0 ? " · pendiente" : ""}</div></div>
+            <div className="li-amount" style={{ color: "var(--cherry)" }}>-{money(c.cantidad * c.precio)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -553,81 +647,62 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
   const [descripcion, setDescripcion] = useState("");
   const [valor, setValor] = useState("");
   const [formaPago, setFormaPago] = useState("Nequi");
-  const [interpretando, setInterpretando] = useState(false);
+  const [llenado, setLlenado] = useState({});
 
   const procesarVoz = async (texto) => {
-    setInterpretando(true);
     const resultado = await interpretarConGemini(texto, "gasto", null);
-    setInterpretando(false);
-
     const nums = extraerNumeros(texto);
     const gLocal = detectarGasto(texto);
     const pagoLocal = detectarFormaPago(texto);
-
     const desc = resultado?.descripcion || gLocal;
     const val = resultado?.precio ?? nums[0];
     const pago = resultado?.formaPago ?? pagoLocal;
-
-    if (desc) setDescripcion(desc);
-    if (val) setValor(String(val));
-    if (pago) setFormaPago(pago);
+    const flags = {};
+    if (desc) { setDescripcion(desc); flags.descripcion = true; }
+    if (val) { setValor(String(val)); flags.valor = true; }
+    if (pago) { setFormaPago(pago); flags.pago = true; }
+    setLlenado((prev) => ({ ...prev, ...flags }));
+    if (val) return `Gasto listo · ${money(val)}`;
+    return "Formulario actualizado";
   };
-  const guardar = () => { onRegistrar({ descripcion, valor: Number(valor), formaPago }); setDescripcion(""); setValor(""); };
+
+  const guardar = () => { onRegistrar({ descripcion, valor: Number(valor), formaPago }); setDescripcion(""); setValor(""); setLlenado({}); };
 
   return (
     <div>
-      <CampoVoz placeholder='Ej: "pagué 100 mil de agua por Nequi"' onTexto={procesarVoz} interpretando={interpretando} />
-      <div className="rounded-xl bg-white p-4">
-        <Campo label="Descripción"><input className={inputCls} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Arriendo, agua, luz…" /></Campo>
-        <div className="flex gap-3">
-          <div className="flex-1"><Campo label="Valor"><input className={inputCls} value={valor} onChange={(e) => setValor(e.target.value)} inputMode="numeric" /></Campo></div>
-          <div className="flex-1"><Campo label="Forma de pago"><select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select></Campo></div>
+      <div className="info-banner caramel"><Icon name="receipt" size={18} color="var(--caramel-text)" /><span>Costos fijos y operativos del negocio (arriendo, servicios, nómina…)</span></div>
+      <AsistenteVoz placeholder='Ej: "pagué 100 mil de agua por Nequi"' onTexto={procesarVoz} />
+      <div className="form-card caramel">
+        <Campo label="Descripción"><input className={llenado.descripcion ? "filled" : ""} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Arriendo, agua, luz…" /></Campo>
+        <div className="field-row">
+          <Campo label="Valor"><input className={llenado.valor ? "filled" : ""} value={valor} onChange={(e) => setValor(e.target.value)} inputMode="numeric" /></Campo>
+          <Campo label="Forma de pago"><select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select></Campo>
         </div>
-        <button onClick={guardar} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Guardar gasto</button>
+        <button type="button" className="submit-btn caramel" style={{ marginTop: 6 }} onClick={guardar}>Guardar gasto</button>
       </div>
-      <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Gastos del mes</p>
-      <div className="space-y-2">
-        {gastos.map((g) => (
-          <div key={g.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
-            <div><p className="text-[#3b2a22]">{g.descripcion}</p><p className="text-xs text-[#8a7f72]">{g.formaPago}{!g.pagado ? " · pendiente" : ""}</p></div>
-            <div className="flex items-center gap-2">
-              <p className="font-medium text-[#854f0b]">{money(g.valor)}</p>
-              {!g.pagado && <button onClick={() => onPagar(g.id)} className="rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]">Pagar</button>}
-              {onEliminar && <button onClick={() => onEliminar(g.id)} className="rounded-md border border-[#f3d5cb] px-2 py-1 text-xs text-[#a3452f]">Eliminar</button>}
-            </div>
+      <p className="list-title">Gastos del mes</p>
+      {gastos.map((g) => (
+        <div key={g.id} className="list-row">
+          <div><div className="li-main">{g.descripcion}</div><div className="li-sub">{g.formaPago}{!g.pagado ? " · pendiente" : ""}</div></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="li-amount" style={{ color: "var(--caramel-text)" }}>{money(g.valor)}</span>
+            {!g.pagado && <button type="button" onClick={() => onPagar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem" }}>Pagar</button>}
+            {onEliminar && <button type="button" onClick={() => onEliminar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem", color: "var(--cherry)" }}>Eliminar</button>}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-const DIAS_ALERTA_VENCIMIENTO = 15;
-
-function diasParaVencer(fechaStr) {
-  if (!fechaStr) return null;
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const f = new Date(fechaStr + "T00:00:00");
-  return Math.round((f - hoy) / (1000 * 60 * 60 * 24));
-}
-
 function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
   const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
-  const porVencer = productos.filter((p) => {
-    const dias = diasParaVencer(p.fechaVencimiento);
-    return dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
-  });
-  const maxStock = Math.max(...productos.map((p) => p.stock), 1);
+  const porVencer = productos.filter((p) => { const d = diasParaVencer(p.fechaVencimiento); return d !== null && d <= DIAS_ALERTA_VENCIMIENTO; });
   const [mostrarForm, setMostrarForm] = useState(false);
   const [modo, setModo] = useState("ajustar");
-
-  // Ajustar stock / vencimiento de un producto existente
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [delta, setDelta] = useState("");
   const [vencimientoAjuste, setVencimientoAjuste] = useState("");
-
-  // Producto nuevo
   const [nombre, setNombre] = useState("");
   const [stockInicial, setStockInicial] = useState("");
   const [costoInicial, setCostoInicial] = useState("");
@@ -636,10 +711,14 @@ function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
-  const guardarAjuste = () => {
-    onAjustarStock(Number(productoId), Number(delta) || 0, vencimientoAjuste || null);
-    setDelta(""); setVencimientoAjuste("");
+  const procesarVoz = async (texto) => {
+    await new Promise((r) => setTimeout(r, 300));
+    const prod = detectarProducto(texto, productos);
+    if (prod) return `${prod.nombre}: ${prod.stock} unidades disponibles.`;
+    return "Dime el nombre de un producto para consultar su stock.";
   };
+
+  const guardarAjuste = () => { onAjustarStock(Number(productoId), Number(delta) || 0, vencimientoAjuste || null); setDelta(""); setVencimientoAjuste(""); };
   const guardarNuevo = () => {
     onAgregarProducto({ nombre, stock: stockInicial, costoProm: costoInicial, precioVenta: precioInicial, fechaVencimiento: vencimientoInicial || null });
     setNombre(""); setStockInicial(""); setCostoInicial(""); setPrecioInicial(""); setVencimientoInicial("");
@@ -647,88 +726,72 @@ function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
 
   return (
     <div>
-      {stockBajo.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg bg-[#faece7] px-3 py-2.5 text-sm text-[#993c1d]">
-          <Icon name="alert-triangle" size={16} />
-          <span>{stockBajo.length} producto(s) con stock por debajo de {STOCK_MINIMO} unidades</span>
-        </div>
-      )}
-      {porVencer.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg bg-[#faeeda] px-3 py-2.5 text-sm text-[#854f0b]">
-          <Icon name="alert-triangle" size={16} />
-          <span>{porVencer.length} producto(s) vencidos o próximos a vencer (≤ {DIAS_ALERTA_VENCIMIENTO} días)</span>
-        </div>
-      )}
-      <div className="space-y-3">
-        {productos.map((p) => {
-          const bajo = p.stock < STOCK_MINIMO;
-          const dias = diasParaVencer(p.fechaVencimiento);
-          const vence = dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
-          return (
-            <div key={p.id} className="rounded-xl bg-white p-3">
-              <div className="mb-1.5 flex items-center justify-between">
-                <p className="text-sm text-[#3b2a22]">{p.nombre}</p>
-                <p className={`text-sm font-medium ${bajo ? "text-[#a3452f]" : "text-[#3b6d11]"}`}>{p.stock} u</p>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#f0e9dd]">
-                <div className={`h-full rounded-full ${bajo ? "bg-[#c9583d]" : "bg-[#6b9950]"}`} style={{ width: `${Math.min(100, (p.stock / maxStock) * 100)}%` }} />
-              </div>
-              <p className="mt-1.5 text-xs text-[#8a7f72]">Costo promedio: {money(p.costoProm)} · Venta: {money(p.precioVenta)}</p>
-              {p.fechaVencimiento && (
-                <p className={`mt-1 text-xs ${vence ? "font-medium text-[#993c1d]" : "text-[#8a7f72]"}`}>
-                  {dias < 0 ? `Venció hace ${Math.abs(dias)} días` : dias === 0 ? "Vence hoy" : `Vence en ${dias} días`} ({p.fechaVencimiento})
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-4 text-xs text-[#8a7f72]">El inventario se actualiza automáticamente con cada compra (entrada) y cada venta (salida). El costo promedio se recalcula por compra.</p>
+      <div className="info-banner dusk"><Icon name="package" size={18} color="var(--dusk)" /><span>Consulta y ajusta las existencias de cada producto</span></div>
+      <AsistenteVoz placeholder='Ej: "¿cuánto stock de café volcán me queda?"' onTexto={procesarVoz} />
 
-      <div className="mt-5">
+      {stockBajo.length > 0 && <div className="info-banner cherry" style={{ marginBottom: 10 }}><Icon name="alertTriangle" size={16} color="var(--cherry)" /><span>{stockBajo.length} producto(s) con stock por debajo de {STOCK_MINIMO} unidades</span></div>}
+      {porVencer.length > 0 && <div className="info-banner caramel" style={{ marginBottom: 14 }}><Icon name="alertTriangle" size={16} color="var(--caramel-text)" /><span>{porVencer.length} producto(s) vencidos o próximos a vencer</span></div>}
+
+      <p className="list-title">Productos</p>
+      {productos.map((p) => {
+        const bajo = p.stock < STOCK_MINIMO;
+        const dias = diasParaVencer(p.fechaVencimiento);
+        const vence = dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
+        return (
+          <div key={p.id} className="stock-row">
+            <div>
+              <div className="si-name">{p.nombre}</div>
+              <div className={`si-qty ${bajo ? "low" : ""}`}>{p.stock} unidades{bajo ? " · stock bajo" : ""}</div>
+              <div className="si-vence">Costo: {money(p.costoProm)} · Venta: {money(p.precioVenta)}</div>
+              {p.fechaVencimiento && <div className={`si-vence ${vence ? "pronto" : ""}`}>{dias < 0 ? `Venció hace ${Math.abs(dias)} días` : dias === 0 ? "Vence hoy" : `Vence en ${dias} días`}</div>}
+            </div>
+            <div className="si-qty-num">{p.stock} u</div>
+          </div>
+        );
+      })}
+
+      <div style={{ marginTop: 18 }}>
         {!mostrarForm ? (
-          <button onClick={() => setMostrarForm(true)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[#d8cbb8] py-2.5 text-sm text-[#6b4f3b]">
+          <button type="button" className="submit-btn ghost" onClick={() => setMostrarForm(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             <Icon name="package" size={16} /> Registrar inventario manual
           </button>
         ) : (
-          <div className="rounded-xl bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-medium text-[#3b2a22]">Inventario manual</p>
-              <button onClick={() => setMostrarForm(false)} className="text-xs text-[#8a7f72]">Cerrar</button>
+          <div className="form-card dusk">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: "0.92rem", color: "var(--espresso-900)" }}>Inventario manual</p>
+              <button type="button" onClick={() => setMostrarForm(false)} style={{ background: "none", border: "none", fontSize: "0.78rem", color: "var(--espresso-600)", cursor: "pointer" }}>Cerrar</button>
             </div>
-            <div className="mb-3 flex gap-2">
-              <button onClick={() => setModo("ajustar")} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${modo === "ajustar" ? "bg-[#6b4f3b] text-white" : "bg-[#f0e9dd] text-[#6b4f3b]"}`}>Ajustar existente</button>
-              <button onClick={() => setModo("nuevo")} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${modo === "nuevo" ? "bg-[#6b4f3b] text-white" : "bg-[#f0e9dd] text-[#6b4f3b]"}`}>Producto nuevo</button>
+            <div className="period-tabs">
+              <button type="button" className={`period-tab ${modo === "ajustar" ? "active" : ""}`} onClick={() => setModo("ajustar")}>Ajustar existente</button>
+              <button type="button" className={`period-tab ${modo === "nuevo" ? "active" : ""}`} onClick={() => setModo("nuevo")}>Producto nuevo</button>
             </div>
-
             {modo === "ajustar" ? (
               <>
-                <p className="mb-3 text-xs text-[#8a7f72]">Para corregir un conteo físico, registrar inventario sin factura, o actualizar la fecha de vencimiento.</p>
                 <Campo label="Producto">
-                  <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+                  <select value={productoId} onChange={(e) => setProductoId(e.target.value)}>
                     {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre} (actual: {p.stock} u)</option>)}
                   </select>
                 </Campo>
-                <Campo label="Cantidad a sumar o restar (opcional)"><input className={inputCls} value={delta} onChange={(e) => setDelta(e.target.value)} placeholder="Ej: 20 o -5" inputMode="numeric" /></Campo>
-                <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimientoAjuste} onChange={(e) => setVencimientoAjuste(e.target.value)} /></Campo>
-                <button onClick={guardarAjuste} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Aplicar</button>
+                <Campo label="Cantidad a sumar o restar (opcional)"><input value={delta} onChange={(e) => setDelta(e.target.value)} placeholder="Ej: 20 o -5" inputMode="numeric" /></Campo>
+                <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimientoAjuste} onChange={(e) => setVencimientoAjuste(e.target.value)} /></Campo>
+                <button type="button" className="submit-btn dusk" onClick={guardarAjuste}>Aplicar</button>
               </>
             ) : (
               <>
-                <p className="mb-3 text-xs text-[#8a7f72]">Para dar de alta un producto que no existía en el catálogo, con su inventario inicial.</p>
-                <Campo label="Nombre del producto"><input className={inputCls} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
-                <div className="flex gap-3">
-                  <div className="flex-1"><Campo label="Stock inicial"><input className={inputCls} value={stockInicial} onChange={(e) => setStockInicial(e.target.value)} inputMode="numeric" /></Campo></div>
-                  <div className="flex-1"><Campo label="Costo promedio"><input className={inputCls} value={costoInicial} onChange={(e) => setCostoInicial(e.target.value)} inputMode="numeric" /></Campo></div>
+                <Campo label="Nombre del producto"><input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
+                <div className="field-row">
+                  <Campo label="Stock inicial"><input value={stockInicial} onChange={(e) => setStockInicial(e.target.value)} inputMode="numeric" /></Campo>
+                  <Campo label="Costo promedio"><input value={costoInicial} onChange={(e) => setCostoInicial(e.target.value)} inputMode="numeric" /></Campo>
                 </div>
-                <Campo label="Precio de venta"><input className={inputCls} value={precioInicial} onChange={(e) => setPrecioInicial(e.target.value)} inputMode="numeric" /></Campo>
-                <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimientoInicial} onChange={(e) => setVencimientoInicial(e.target.value)} /></Campo>
-                <button onClick={guardarNuevo} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Agregar producto</button>
+                <Campo label="Precio de venta"><input value={precioInicial} onChange={(e) => setPrecioInicial(e.target.value)} inputMode="numeric" /></Campo>
+                <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimientoInicial} onChange={(e) => setVencimientoInicial(e.target.value)} /></Campo>
+                <button type="button" className="submit-btn dusk" onClick={guardarNuevo}>Agregar producto</button>
               </>
             )}
           </div>
         )}
       </div>
+      <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--espresso-600)" }}>El inventario se actualiza automáticamente con cada compra (entrada) y cada venta (salida). El costo promedio se recalcula por compra.</p>
     </div>
   );
 }
@@ -737,61 +800,39 @@ function GraficoSemana({ series }) {
   const max = Math.max(1, ...series.flatMap((s) => s.datos.map((d) => d.total)));
   const dias = series[0]?.datos || [];
   return (
-    <div className="mb-4 rounded-xl bg-white p-4">
-      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Últimos 7 días</p>
-      <div className="flex items-end justify-between" style={{ height: 110 }}>
-        {dias.map((_, i) => (
-          <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
-            <div className="flex w-full items-end justify-center gap-1" style={{ height: 90 }}>
-              {series.map((s) => {
-                const valor = s.datos[i]?.total || 0;
-                const alturaPct = (valor / max) * 100;
-                return (
-                  <div
-                    key={s.label}
-                    title={`${s.label} · ${dias[i].label}: ${money(valor)}`}
-                    style={{ height: `${Math.max(alturaPct, valor > 0 ? 4 : 0)}%`, background: s.color, width: 7, borderRadius: 3 }}
-                  />
-                );
-              })}
-            </div>
-            <span className="text-[9px] text-[#8a7f72]">{dias[i].label}</span>
+    <div className="bars">
+      {dias.map((_, i) => (
+        <div key={i} className="bar-wrap">
+          <div className="bar-group">
+            {series.map((s) => {
+              const valor = s.datos[i]?.total || 0;
+              const alturaPct = Math.max((valor / max) * 100, valor > 0 ? 4 : 0);
+              return <div key={s.label} title={`${s.label}: ${money(valor)}`} className="bar" style={{ height: `${alturaPct}%`, background: s.color }} />;
+            })}
           </div>
-        ))}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-3">
-        {series.map((s) => (
-          <span key={s.label} className="flex items-center gap-1.5 text-[10px] text-[#8a7f72]">
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block" }} />
-            {s.label}
-          </span>
-        ))}
-      </div>
+          <span className="bar-day">{dias[i].label}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function dentroDePeriodo(fechaStr, periodo) {
-  if (!fechaStr) return false;
-  const f = new Date(fechaStr);
-  const hoy = new Date();
-  if (periodo === "dia") {
-    return f.toDateString() === hoy.toDateString();
-  }
-  if (periodo === "semana") {
-    const diffDias = (hoy - f) / (1000 * 60 * 60 * 24);
-    return diffDias >= 0 && diffDias < 7;
-  }
-  if (periodo === "mes") {
-    return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth();
-  }
-  return true;
+function Linea({ label, valor, fuerte }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: "0.88rem" }}>
+      <span style={{ color: fuerte ? "var(--espresso-900)" : "var(--espresso-600)", fontWeight: fuerte ? 600 : 400 }}>{label}</span>
+      <span style={{ color: "var(--espresso-900)", fontWeight: fuerte ? 700 : 600 }}>{money(valor)}</span>
+    </div>
+  );
+}
+
+function VolverBoton({ onClick }) {
+  return <button type="button" onClick={onClick} style={{ background: "none", border: "none", color: "var(--caramel-text)", fontWeight: 700, fontSize: "0.85rem", marginBottom: 14, cursor: "pointer", padding: 0 }}>← Volver a reportes</button>;
 }
 
 function FlujoCaja({ ventas, compras, gastos, volver }) {
   const [periodo, setPeriodo] = useState("dia");
   const PERIODOS = [{ id: "dia", label: "Día" }, { id: "semana", label: "Semana" }, { id: "mes", label: "Mes" }];
-
   const calculo = useMemo(() => {
     const ingresos = ventas.filter((v) => v.formaPago === "Efectivo" && dentroDePeriodo(v.fecha, periodo)).reduce((s, v) => s + v.cantidad * v.precio, 0);
     const comprasEf = compras.filter((c) => c.formaPago === "Efectivo" && dentroDePeriodo(c.fecha, periodo)).reduce((s, c) => s + c.cantidad * c.precio, 0);
@@ -801,77 +842,18 @@ function FlujoCaja({ ventas, compras, gastos, volver }) {
 
   return (
     <div>
-      <button onClick={volver} className="mb-3 text-sm text-[#6b4f3b]">← Volver a reportes</button>
-      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Flujo de Caja</p>
-      <div className="mb-4 flex gap-2">
-        {PERIODOS.map((p) => (
-          <button key={p.id} onClick={() => setPeriodo(p.id)} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${periodo === p.id ? "bg-[#6b4f3b] text-white" : "bg-white text-[#6b4f3b]"}`}>
-            {p.label}
-          </button>
-        ))}
+      <VolverBoton onClick={volver} />
+      <p className="list-title">Flujo de Caja</p>
+      <div className="period-tabs">
+        {PERIODOS.map((p) => <button key={p.id} type="button" className={`period-tab ${periodo === p.id ? "active" : ""}`} onClick={() => setPeriodo(p.id)}>{p.label}</button>)}
       </div>
-      <div className="rounded-xl bg-white p-4">
+      <div className="form-card">
         <Linea label="Ingresos recibidos en efectivo" valor={calculo.ingresos} />
         <Linea label="Compras pagadas en efectivo" valor={-calculo.comprasEf} />
         <Linea label="Gastos pagados en efectivo" valor={-calculo.gastosEf} />
-        <div className="mt-1 border-t border-[#e4d9c9] pt-1.5"><Linea label="Total en caja" valor={calculo.total} fuerte /></div>
+        <div style={{ borderTop: "1px solid var(--cream-dim)", marginTop: 6, paddingTop: 6 }}><Linea label="Total en caja" valor={calculo.total} fuerte /></div>
       </div>
-      <p className="mt-3 text-xs text-[#8a7f72]">Solo cuenta movimientos pagados en efectivo — las ventas/compras a crédito o por Nequi/tarjeta no mueven la caja física.</p>
-    </div>
-  );
-}
-
-function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta, onPagarCompra }) {
-  const [vista, setVista] = useState("resumen");
-  const { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
-
-  if (vista === "cobrar") return <ListaCuentas titulo="Cuentas por cobrar" items={cuentasPorCobrar} productos={productos} tipo="cobrar" onAccion={onAbonarVenta} volver={() => setVista("resumen")} />;
-  if (vista === "pagar") return <ListaCuentas titulo="Cuentas por pagar" items={cuentasPorPagar} productos={productos} tipo="pagar" onAccion={onPagarCompra} volver={() => setVista("resumen")} />;
-  if (vista === "flujo") return <FlujoCaja ventas={ventas} compras={compras} gastos={gastos} volver={() => setVista("resumen")} />;
-
-  return (
-    <div>
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-white p-3"><p className="text-xs text-[#8a7f72]">Caja (efectivo)</p><p className="text-lg font-semibold text-[#3b2a22]">{money(caja)}</p></div>
-        <div className="rounded-xl bg-white p-3"><p className="text-xs text-[#8a7f72]">Utilidad del período</p><p className={`text-lg font-semibold ${utilidad >= 0 ? "text-[#3b6d11]" : "text-[#a3452f]"}`}>{money(utilidad)}</p></div>
-      </div>
-
-      <GraficoSemana
-        series={[
-          { label: "Ventas", color: "#3b6d11", datos: semana.ventas },
-          { label: "Compras", color: "#993c1d", datos: semana.compras },
-          { label: "Gastos", color: "#854f0b", datos: semana.gastos },
-        ]}
-      />
-
-      <div className="mb-4 rounded-xl bg-white p-4">
-        <p className="mb-2 text-sm font-medium text-[#3b2a22]">Estado de resultado</p>
-        <Linea label="Total ventas" valor={totalVentas} />
-        <Linea label="Costo de venta" valor={-totalCosto} />
-        <Linea label="Gastos" valor={-totalGastos} />
-        <div className="mt-1 border-t border-[#e4d9c9] pt-1.5"><Linea label="Utilidad" valor={utilidad} fuerte /></div>
-      </div>
-      <button onClick={() => setVista("flujo")} className="mb-2 flex w-full items-center justify-between rounded-lg bg-white px-3 py-3 text-sm">
-        <span className="flex items-center gap-2 text-[#3b2a22]"><Icon name="chart-bar" size={16} color="#185fa5" /> Flujo de Caja</span>
-        <Icon name="chevron-right" size={14} color="#8a7f72" />
-      </button>
-      <button onClick={() => setVista("cobrar")} className="mb-2 flex w-full items-center justify-between rounded-lg bg-white px-3 py-3 text-sm">
-        <span className="flex items-center gap-2 text-[#3b2a22]"><Icon name="users" size={16} color="#185fa5" /> Cuentas por cobrar</span>
-        <span className="flex items-center gap-1 text-[#8a7f72]">{cuentasPorCobrar.length} <Icon name="chevron-right" size={14} /></span>
-      </button>
-      <button onClick={() => setVista("pagar")} className="flex w-full items-center justify-between rounded-lg bg-white px-3 py-3 text-sm">
-        <span className="flex items-center gap-2 text-[#3b2a22]"><Icon name="truck" size={16} color="#185fa5" /> Cuentas por pagar</span>
-        <span className="flex items-center gap-1 text-[#8a7f72]">{cuentasPorPagar.length} <Icon name="chevron-right" size={14} /></span>
-      </button>
-    </div>
-  );
-}
-
-function Linea({ label, valor, fuerte }) {
-  return (
-    <div className="flex justify-between py-0.5 text-sm">
-      <span className={fuerte ? "font-medium text-[#3b2a22]" : "text-[#8a7f72]"}>{label}</span>
-      <span className={fuerte ? "font-semibold text-[#3b2a22]" : "text-[#3b2a22]"}>{money(valor)}</span>
+      <p style={{ fontSize: "0.78rem", color: "var(--espresso-600)", marginTop: 10 }}>Solo cuenta movimientos pagados en efectivo — las ventas/compras a crédito o por Nequi/tarjeta no mueven la caja física.</p>
     </div>
   );
 }
@@ -879,25 +861,78 @@ function Linea({ label, valor, fuerte }) {
 function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
   return (
     <div>
-      <button onClick={volver} className="mb-3 text-sm text-[#6b4f3b]">← Volver a reportes</button>
-      <p className="mb-3 text-sm font-medium text-[#3b2a22]">{titulo}</p>
-      {items.length === 0 && <p className="text-sm text-[#8a7f72]">No hay pendientes.</p>}
-      <div className="space-y-2">
-        {items.map((it) => {
-          const prod = tipo === "cobrar" || it.tipo === "Compra" ? productos.find((p) => p.id === it.productoId) : null;
-          const nombre = it.tipo === "Gasto" ? it.descripcion : prod?.nombre;
-          return (
-            <div key={it.id} className="rounded-lg bg-white px-3 py-2.5">
-              <div className="flex items-center justify-between text-sm">
-                <p className="text-[#3b2a22]">{nombre}</p>
-                <p className="font-medium text-[#a3452f]">{money(it.saldo)}</p>
-              </div>
-              {tipo === "cobrar" && it.saldo > 0 && <button onClick={() => onAccion(it.id, it.saldo)} className="mt-1.5 rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]">Registrar abono total</button>}
-              {tipo === "pagar" && it.tipo === "Compra" && it.saldo > 0 && <button onClick={() => onAccion(it.id, it.saldo)} className="mt-1.5 rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]">Registrar pago total</button>}
+      <VolverBoton onClick={volver} />
+      <p className="list-title">{titulo}</p>
+      {items.length === 0 && <p className="list-empty">No hay pendientes.</p>}
+      {items.map((it) => {
+        const prod = tipo === "cobrar" || it.tipo === "Compra" ? productos.find((p) => p.id === it.productoId) : null;
+        const nombre = it.tipo === "Gasto" ? it.descripcion : prod?.nombre;
+        const accionable = (tipo === "cobrar" && it.saldo > 0) || (tipo === "pagar" && it.tipo === "Compra" && it.saldo > 0);
+        return (
+          <div key={it.id} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span className="li-main">{nombre}</span>
+              <span className="li-amount" style={{ color: "var(--cherry)" }}>{money(it.saldo)}</span>
             </div>
-          );
-        })}
+            {accionable && (
+              <button type="button" className="submit-btn ghost" style={{ width: "auto", alignSelf: "flex-start", padding: "7px 12px", fontSize: "0.78rem" }} onClick={() => onAccion(it.id, it.saldo)}>
+                {tipo === "cobrar" ? "Registrar abono total" : "Registrar pago total"}
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta, onPagarCompra }) {
+  const [vista, setVista] = useState("resumen");
+  const { totalVentas, totalGastos, utilidad, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
+
+  if (vista === "cobrar") return <ListaCuentas titulo="Cuentas por cobrar" items={cuentasPorCobrar} productos={productos} tipo="cobrar" onAccion={onAbonarVenta} volver={() => setVista("resumen")} />;
+  if (vista === "pagar") return <ListaCuentas titulo="Cuentas por pagar" items={cuentasPorPagar} productos={productos} tipo="pagar" onAccion={onPagarCompra} volver={() => setVista("resumen")} />;
+  if (vista === "flujo") return <FlujoCaja ventas={ventas} compras={compras} gastos={gastos} volver={() => setVista("resumen")} />;
+
+  return (
+    <div>
+      <div className="info-banner plum"><Icon name="bars" size={18} color="var(--plum)" /><span>Resumen de tu negocio — ventas, gastos y ganancia</span></div>
+      <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={async () => `Tu utilidad acumulada es ${money(utilidad)}.`} />
+
+      <div className="stats3">
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentas)}</p></div>
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)" }}><p className="stat-label">Gastos</p><p className="stat-value">{money(totalGastos)}</p></div>
+        <div className="stat-card" style={{ borderLeft: `3px solid ${utilidad >= 0 ? "var(--pine)" : "var(--cherry)"}` }}><p className="stat-label">Ganancia</p><p className="stat-value">{money(utilidad)}</p></div>
       </div>
+
+      <p className="list-title">Últimos 7 días</p>
+      <GraficoSemana series={[{ label: "Ventas", color: "var(--pine)", datos: semana.ventas }, { label: "Compras", color: "var(--cherry)", datos: semana.compras }, { label: "Gastos", color: "var(--caramel)", datos: semana.gastos }]} />
+      <div style={{ display: "flex", gap: 14, margin: "10px 0 20px", fontSize: "0.7rem", color: "var(--espresso-600)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--pine)", display: "inline-block" }} />Ventas</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--cherry)", display: "inline-block" }} />Compras</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--caramel)", display: "inline-block" }} />Gastos</span>
+      </div>
+
+      <div className="form-card">
+        <p style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 8, color: "var(--espresso-900)" }}>Estado de resultado</p>
+        <Linea label="Total ventas" valor={totalVentas} />
+        <Linea label="Costo de venta" valor={-reportes.totalCosto} />
+        <Linea label="Gastos" valor={-totalGastos} />
+        <div style={{ borderTop: "1px solid var(--cream-dim)", marginTop: 6, paddingTop: 6 }}><Linea label="Utilidad" valor={utilidad} fuerte /></div>
+      </div>
+
+      <button type="button" className="report-link" onClick={() => setVista("flujo")}>
+        <span className="rl-left"><Icon name="bars" size={16} color="var(--dusk)" /> Flujo de Caja</span>
+        <span className="rl-right"><Icon name="chevronRight" size={14} /></span>
+      </button>
+      <button type="button" className="report-link" onClick={() => setVista("cobrar")}>
+        <span className="rl-left"><Icon name="users" size={16} color="var(--dusk)" /> Cuentas por cobrar</span>
+        <span className="rl-right">{cuentasPorCobrar.length} <Icon name="chevronRight" size={14} /></span>
+      </button>
+      <button type="button" className="report-link" onClick={() => setVista("pagar")}>
+        <span className="rl-left"><Icon name="truck" size={16} color="var(--dusk)" /> Cuentas por pagar</span>
+        <span className="rl-right">{cuentasPorPagar.length} <Icon name="chevronRight" size={14} /></span>
+      </button>
     </div>
   );
 }
