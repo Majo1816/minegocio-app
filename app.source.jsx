@@ -7,6 +7,20 @@ import logoUrl from "./assets/logo.png";
 const STOCK_MINIMO = 30;
 const FORMAS_PAGO = ["Efectivo", "Nequi", "Transferencia", "Tarjeta", "Crédito"];
 const GASTOS_CATALOGO = ["Agua", "Luz", "Internet", "Nómina", "Seguridad social", "Arriendo", "Útiles de aseo", "Vigilancia"];
+const DIAS_SEMANA = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+function agruparUltimosDias(items, montoFn, dias = 7) {
+  const hoy = new Date();
+  const resultado = [];
+  for (let i = dias - 1; i >= 0; i--) {
+    const d = new Date(hoy);
+    d.setDate(d.getDate() - i);
+    const clave = d.toISOString().slice(0, 10);
+    const total = items.filter((it) => it.fecha && it.fecha.slice(0, 10) === clave).reduce((s, it) => s + montoFn(it), 0);
+    resultado.push({ label: DIAS_SEMANA[d.getDay()], total });
+  }
+  return resultado;
+}
 
 // ---------- utilidades ----------
 const money = (n) => "$" + Math.round(n || 0).toLocaleString("es-CO");
@@ -172,9 +186,9 @@ function App() {
       supabase.from("gastos").select("*").order("creado_en", { ascending: false }),
     ]);
     setProductos((prod || []).map((p) => ({ id: Number(p.id), nombre: p.nombre, stock: p.stock, costoProm: Number(p.costo_prom), precioVenta: Number(p.precio_venta) })));
-    setVentas((vt || []).map((v) => ({ id: Number(v.id), productoId: Number(v.producto_id), cantidad: v.cantidad, precio: Number(v.precio), formaPago: v.forma_pago, costoUnit: Number(v.costo_unit), saldo: Number(v.saldo) })));
-    setCompras((cp || []).map((c) => ({ id: Number(c.id), productoId: Number(c.producto_id), cantidad: c.cantidad, precio: Number(c.precio), formaPago: c.forma_pago, saldo: Number(c.saldo) })));
-    setGastos((gs || []).map((g) => ({ id: Number(g.id), descripcion: g.descripcion, valor: Number(g.valor), formaPago: g.forma_pago, pagado: g.pagado })));
+    setVentas((vt || []).map((v) => ({ id: Number(v.id), productoId: Number(v.producto_id), cantidad: v.cantidad, precio: Number(v.precio), formaPago: v.forma_pago, costoUnit: Number(v.costo_unit), saldo: Number(v.saldo), fecha: v.creado_en })));
+    setCompras((cp || []).map((c) => ({ id: Number(c.id), productoId: Number(c.producto_id), cantidad: c.cantidad, precio: Number(c.precio), formaPago: c.forma_pago, saldo: Number(c.saldo), fecha: c.creado_en })));
+    setGastos((gs || []).map((g) => ({ id: Number(g.id), descripcion: g.descripcion, valor: Number(g.valor), formaPago: g.forma_pago, pagado: g.pagado, fecha: g.creado_en })));
   }, []);
 
   const cargarEmpleados = useCallback(async () => {
@@ -211,7 +225,12 @@ function App() {
       ...compras.filter((c) => c.saldo > 0).map((c) => ({ ...c, tipo: "Compra" })),
       ...gastos.filter((g) => !g.pagado).map((g) => ({ ...g, tipo: "Gasto", saldo: g.valor })),
     ];
-    return { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar };
+    const semana = {
+      ventas: agruparUltimosDias(ventas, (v) => v.cantidad * v.precio),
+      compras: agruparUltimosDias(compras, (c) => c.cantidad * c.precio),
+      gastos: agruparUltimosDias(gastos, (g) => g.valor),
+    };
+    return { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar, semana };
   }, [ventas, compras, gastos]);
 
   if (cargandoSesion) {
@@ -384,6 +403,8 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
 }
 
 function Ingresos({ productos, ventas, onRegistrar }) {
+  const COLOR = "#3b6d11";
+  const COLOR_BG = "#eaf3de";
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
@@ -415,8 +436,12 @@ function Ingresos({ productos, ventas, onRegistrar }) {
 
   return (
     <div>
+      <div className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: COLOR_BG, color: COLOR }}>
+        <Icon name="arrow-down-circle" size={14} />
+        Dinero que entra al negocio — cada venta suma a tu caja y descuenta del inventario
+      </div>
       <CampoVoz placeholder='Ej: "vendí 5 café volcán a 31.460 en efectivo"' onTexto={procesarVoz} interpretando={interpretando} />
-      <div className="rounded-xl bg-white p-4">
+      <div className="rounded-xl border-t-4 bg-white p-4" style={{ borderColor: COLOR }}>
         <Campo label="Producto">
           <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
             {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
@@ -429,7 +454,7 @@ function Ingresos({ productos, ventas, onRegistrar }) {
         <Campo label="Forma de pago">
           <select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
         </Campo>
-        <button onClick={guardar} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Guardar venta</button>
+        <button onClick={guardar} className="mt-1 w-full rounded-lg py-2.5 text-sm font-medium text-white" style={{ background: COLOR }}>Guardar venta</button>
       </div>
       <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Ventas recientes</p>
       <div className="space-y-2">
@@ -438,16 +463,19 @@ function Ingresos({ productos, ventas, onRegistrar }) {
           return (
             <div key={v.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
               <div><p className="text-[#3b2a22]">{prod?.nombre}</p><p className="text-xs text-[#8a7f72]">{v.cantidad} u · {v.formaPago}</p></div>
-              <p className="font-medium text-[#3b6d11]">{money(v.cantidad * v.precio)}</p>
+              <p className="font-medium" style={{ color: COLOR }}>+{money(v.cantidad * v.precio)}</p>
             </div>
           );
         })}
+        {ventas.length === 0 && <p className="text-xs text-[#8a7f72]">Aún no has registrado ninguna venta.</p>}
       </div>
     </div>
   );
 }
 
 function Compras({ productos, compras, onRegistrar }) {
+  const COLOR = "#993c1d";
+  const COLOR_BG = "#faece7";
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
@@ -479,8 +507,12 @@ function Compras({ productos, compras, onRegistrar }) {
 
   return (
     <div>
+      <div className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: COLOR_BG, color: COLOR }}>
+        <Icon name="shopping-cart" size={14} />
+        Dinero que sale del negocio — cada compra suma al inventario para poder vender
+      </div>
       <CampoVoz placeholder='Ej: "compré 100 café volcán a 11.460 en efectivo"' onTexto={procesarVoz} interpretando={interpretando} />
-      <div className="rounded-xl bg-white p-4">
+      <div className="rounded-xl border-t-4 bg-white p-4" style={{ borderColor: COLOR }}>
         <Campo label="Producto">
           <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
             {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
@@ -493,7 +525,7 @@ function Compras({ productos, compras, onRegistrar }) {
         <Campo label="Forma de pago">
           <select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
         </Campo>
-        <button onClick={guardar} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Guardar compra</button>
+        <button onClick={guardar} className="mt-1 w-full rounded-lg py-2.5 text-sm font-medium text-white" style={{ background: COLOR }}>Guardar compra</button>
       </div>
       <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Compras recientes</p>
       <div className="space-y-2">
@@ -502,10 +534,11 @@ function Compras({ productos, compras, onRegistrar }) {
           return (
             <div key={c.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
               <div><p className="text-[#3b2a22]">{prod?.nombre}</p><p className="text-xs text-[#8a7f72]">{c.cantidad} u · {c.formaPago}{c.saldo > 0 ? " · pendiente" : ""}</p></div>
-              <p className="font-medium text-[#993c1d]">{money(c.cantidad * c.precio)}</p>
+              <p className="font-medium" style={{ color: COLOR }}>-{money(c.cantidad * c.precio)}</p>
             </div>
           );
         })}
+        {compras.length === 0 && <p className="text-xs text-[#8a7f72]">Aún no has registrado ninguna compra.</p>}
       </div>
     </div>
   );
@@ -597,9 +630,47 @@ function Inventario({ productos }) {
   );
 }
 
+function GraficoSemana({ series }) {
+  const max = Math.max(1, ...series.flatMap((s) => s.datos.map((d) => d.total)));
+  const dias = series[0]?.datos || [];
+  return (
+    <div className="mb-4 rounded-xl bg-white p-4">
+      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Últimos 7 días</p>
+      <div className="flex items-end justify-between" style={{ height: 110 }}>
+        {dias.map((_, i) => (
+          <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
+            <div className="flex w-full items-end justify-center gap-1" style={{ height: 90 }}>
+              {series.map((s) => {
+                const valor = s.datos[i]?.total || 0;
+                const alturaPct = (valor / max) * 100;
+                return (
+                  <div
+                    key={s.label}
+                    title={`${s.label} · ${dias[i].label}: ${money(valor)}`}
+                    style={{ height: `${Math.max(alturaPct, valor > 0 ? 4 : 0)}%`, background: s.color, width: 7, borderRadius: 3 }}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-[9px] text-[#8a7f72]">{dias[i].label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3">
+        {series.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5 text-[10px] text-[#8a7f72]">
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block" }} />
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Reportes({ reportes, productos, onAbonarVenta, onPagarCompra }) {
   const [vista, setVista] = useState("resumen");
-  const { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar } = reportes;
+  const { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
 
   if (vista === "cobrar") return <ListaCuentas titulo="Cuentas por cobrar" items={cuentasPorCobrar} productos={productos} tipo="cobrar" onAccion={onAbonarVenta} volver={() => setVista("resumen")} />;
   if (vista === "pagar") return <ListaCuentas titulo="Cuentas por pagar" items={cuentasPorPagar} productos={productos} tipo="pagar" onAccion={onPagarCompra} volver={() => setVista("resumen")} />;
@@ -610,6 +681,15 @@ function Reportes({ reportes, productos, onAbonarVenta, onPagarCompra }) {
         <div className="rounded-xl bg-white p-3"><p className="text-xs text-[#8a7f72]">Caja (efectivo)</p><p className="text-lg font-semibold text-[#3b2a22]">{money(caja)}</p></div>
         <div className="rounded-xl bg-white p-3"><p className="text-xs text-[#8a7f72]">Utilidad del período</p><p className={`text-lg font-semibold ${utilidad >= 0 ? "text-[#3b6d11]" : "text-[#a3452f]"}`}>{money(utilidad)}</p></div>
       </div>
+
+      <GraficoSemana
+        series={[
+          { label: "Ventas", color: "#3b6d11", datos: semana.ventas },
+          { label: "Compras", color: "#993c1d", datos: semana.compras },
+          { label: "Gastos", color: "#854f0b", datos: semana.gastos },
+        ]}
+      />
+
       <div className="mb-4 rounded-xl bg-white p-4">
         <p className="mb-2 text-sm font-medium text-[#3b2a22]">Estado de resultado</p>
         <Linea label="Total ventas" valor={totalVentas} />
