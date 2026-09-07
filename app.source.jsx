@@ -195,6 +195,25 @@ function App() {
     if (perfil?.rol === "administrador") cargarEmpleados();
   }, [perfil, cargarEmpleados]);
 
+  // Este cálculo debe declararse SIEMPRE en el mismo orden, antes de cualquier
+  // "return" condicional de abajo — es una regla de los Hooks de React.
+  const reportes = useMemo(() => {
+    const totalVentas = ventas.reduce((s, v) => s + v.cantidad * v.precio, 0);
+    const totalCosto = ventas.reduce((s, v) => s + v.cantidad * v.costoUnit, 0);
+    const totalGastos = gastos.reduce((s, g) => s + g.valor, 0);
+    const utilidad = totalVentas - totalCosto - totalGastos;
+    const efectivoVentas = ventas.filter((v) => v.formaPago === "Efectivo").reduce((s, v) => s + v.cantidad * v.precio, 0);
+    const efectivoCompras = compras.filter((c) => c.formaPago === "Efectivo").reduce((s, c) => s + c.cantidad * c.precio, 0);
+    const efectivoGastos = gastos.filter((g) => g.formaPago === "Efectivo").reduce((s, g) => s + g.valor, 0);
+    const caja = efectivoVentas - efectivoCompras - efectivoGastos;
+    const cuentasPorCobrar = ventas.filter((v) => v.saldo > 0);
+    const cuentasPorPagar = [
+      ...compras.filter((c) => c.saldo > 0).map((c) => ({ ...c, tipo: "Compra" })),
+      ...gastos.filter((g) => !g.pagado).map((g) => ({ ...g, tipo: "Gasto", saldo: g.valor })),
+    ];
+    return { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar };
+  }, [ventas, compras, gastos]);
+
   if (cargandoSesion) {
     return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando…</p></div>;
   }
@@ -249,23 +268,6 @@ function App() {
   const eliminarGasto = async (id) => { await supabase.from("gastos").delete().eq("id", id); await cargarTodo(); };
   const cambiarRol = async (id, nuevoRol) => { await supabase.from("profiles").update({ rol: nuevoRol }).eq("id", id); await cargarEmpleados(); };
   const cerrarSesion = async () => { await supabase.auth.signOut(); };
-
-  const reportes = useMemo(() => {
-    const totalVentas = ventas.reduce((s, v) => s + v.cantidad * v.precio, 0);
-    const totalCosto = ventas.reduce((s, v) => s + v.cantidad * v.costoUnit, 0);
-    const totalGastos = gastos.reduce((s, g) => s + g.valor, 0);
-    const utilidad = totalVentas - totalCosto - totalGastos;
-    const efectivoVentas = ventas.filter((v) => v.formaPago === "Efectivo").reduce((s, v) => s + v.cantidad * v.precio, 0);
-    const efectivoCompras = compras.filter((c) => c.formaPago === "Efectivo").reduce((s, c) => s + c.cantidad * c.precio, 0);
-    const efectivoGastos = gastos.filter((g) => g.formaPago === "Efectivo").reduce((s, g) => s + g.valor, 0);
-    const caja = efectivoVentas - efectivoCompras - efectivoGastos;
-    const cuentasPorCobrar = ventas.filter((v) => v.saldo > 0);
-    const cuentasPorPagar = [
-      ...compras.filter((c) => c.saldo > 0).map((c) => ({ ...c, tipo: "Compra" })),
-      ...gastos.filter((g) => !g.pagado).map((g) => ({ ...g, tipo: "Gasto", saldo: g.valor })),
-    ];
-    return { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar };
-  }, [ventas, compras, gastos]);
 
   const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
 
