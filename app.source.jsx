@@ -381,11 +381,14 @@ function App() {
   const cerrarSesion = async () => { await supabase.auth.signOut(); };
 
   const agregarProducto = async ({ nombre, stock, costoProm, precioVenta, fechaVencimiento }) => {
-    if (!nombre) return mostrarToast("Escribe un nombre de producto", "error");
-    const { error } = await supabase.from("productos").insert({ nombre, stock: Number(stock) || 0, costo_prom: Number(costoProm) || 0, precio_venta: Number(precioVenta) || 0, fecha_vencimiento: fechaVencimiento || null });
-    if (error) return mostrarToast("No se pudo agregar el producto", "error");
+    if (!nombre) { mostrarToast("Escribe un nombre de producto", "error"); return null; }
+    const { data, error } = await supabase.from("productos").insert({
+      nombre, stock: Number(stock) || 0, costo_prom: Number(costoProm) || 0, precio_venta: Number(precioVenta) || 0, fecha_vencimiento: fechaVencimiento || null,
+    }).select().single();
+    if (error) { mostrarToast("No se pudo agregar el producto", "error"); return null; }
     await cargarTodo();
     mostrarToast(`Producto agregado: ${nombre}`);
+    return Number(data.id);
   };
 
   const ajustarStock = async (productoId, delta, fechaVencimiento) => {
@@ -407,7 +410,7 @@ function App() {
       <main className="content">
         {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
-        {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} />}
+        {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} onAgregarProducto={agregarProducto} />}
         {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} onEliminar={eliminarGasto} />}
         {pantalla === "inventario" && <Inventario productos={productos} onAgregarProducto={agregarProducto} onAjustarStock={ajustarStock} />}
         {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} ventas={ventas} compras={compras} gastos={gastos} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
@@ -574,13 +577,18 @@ function Ingresos({ productos, ventas, onRegistrar }) {
   );
 }
 
-function Compras({ productos, compras, onRegistrar }) {
+function Compras({ productos, compras, onRegistrar, onAgregarProducto }) {
   const [productoId, setProductoId] = useState(productos[0]?.id);
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
   const [vencimiento, setVencimiento] = useState("");
   const [llenado, setLlenado] = useState({});
+
+  const [mostrarNuevo, setMostrarNuevo] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoPrecioVenta, setNuevoPrecioVenta] = useState("");
+  const [creandoProducto, setCreandoProducto] = useState(false);
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
@@ -608,6 +616,18 @@ function Compras({ productos, compras, onRegistrar }) {
     setCantidad(""); setPrecio(""); setVencimiento(""); setLlenado({});
   };
 
+  const crearProductoNuevo = async () => {
+    if (!nuevoNombre.trim()) return;
+    setCreandoProducto(true);
+    const nuevoId = await onAgregarProducto({ nombre: nuevoNombre.trim(), stock: 0, costoProm: 0, precioVenta: nuevoPrecioVenta || 0 });
+    setCreandoProducto(false);
+    if (nuevoId) {
+      setProductoId(nuevoId);
+      setNuevoNombre(""); setNuevoPrecioVenta("");
+      setMostrarNuevo(false);
+    }
+  };
+
   return (
     <div>
       <div className="info-banner cherry"><Icon name="cart" size={18} color="var(--cherry)" /><span>Dinero que sale del negocio — cada compra suma al inventario para poder vender</span></div>
@@ -618,6 +638,28 @@ function Compras({ productos, compras, onRegistrar }) {
             {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
         </Campo>
+
+        {!mostrarNuevo ? (
+          <button type="button" onClick={() => setMostrarNuevo(true)} style={{ background: "none", border: "none", padding: 0, marginBottom: 16, color: "var(--cherry)", fontWeight: 700, fontSize: "0.82rem", cursor: "pointer" }}>
+            + ¿Es un producto nuevo?
+          </button>
+        ) : (
+          <div style={{ background: "var(--cherry-bg)", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <p style={{ margin: "0 0 10px", fontSize: "0.8rem", fontWeight: 700, color: "var(--cherry)" }}>Registrar producto nuevo</p>
+            <Campo label="Nombre del producto"><input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
+            <Campo label="Precio de venta"><input value={nuevoPrecioVenta} onChange={(e) => setNuevoPrecioVenta(e.target.value)} inputMode="numeric" placeholder="$ 0" /></Campo>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="submit-btn cherry" style={{ flex: 1 }} onClick={crearProductoNuevo} disabled={creandoProducto || !nuevoNombre.trim()}>
+                {creandoProducto ? "Creando…" : "Crear y seleccionar"}
+              </button>
+              <button type="button" className="submit-btn ghost" style={{ flex: 1 }} onClick={() => { setMostrarNuevo(false); setNuevoNombre(""); setNuevoPrecioVenta(""); }}>
+                Cancelar
+              </button>
+            </div>
+            <p style={{ margin: "10px 0 0", fontSize: "0.72rem", color: "var(--espresso-600)" }}>El costo y el stock inicial quedan en 0 — se completan automáticamente con esta misma compra.</p>
+          </div>
+        )}
+
         <div className="field-row">
           <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
           <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
