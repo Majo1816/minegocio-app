@@ -164,7 +164,6 @@ function App() {
   const [ventas, setVentas] = useState([]);
   const [compras, setCompras] = useState([]);
   const [gastos, setGastos] = useState([]);
-  const [empleados, setEmpleados] = useState([]);
   const [toast, setToast] = useState(null);
 
   const mostrarToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 2600); };
@@ -185,29 +184,20 @@ function App() {
       supabase.from("compras").select("*").order("creado_en", { ascending: false }),
       supabase.from("gastos").select("*").order("creado_en", { ascending: false }),
     ]);
-    setProductos((prod || []).map((p) => ({ id: Number(p.id), nombre: p.nombre, stock: p.stock, costoProm: Number(p.costo_prom), precioVenta: Number(p.precio_venta) })));
+    setProductos((prod || []).map((p) => ({ id: Number(p.id), nombre: p.nombre, stock: p.stock, costoProm: Number(p.costo_prom), precioVenta: Number(p.precio_venta), fechaVencimiento: p.fecha_vencimiento })));
     setVentas((vt || []).map((v) => ({ id: Number(v.id), productoId: Number(v.producto_id), cantidad: v.cantidad, precio: Number(v.precio), formaPago: v.forma_pago, costoUnit: Number(v.costo_unit), saldo: Number(v.saldo), fecha: v.creado_en })));
     setCompras((cp || []).map((c) => ({ id: Number(c.id), productoId: Number(c.producto_id), cantidad: c.cantidad, precio: Number(c.precio), formaPago: c.forma_pago, saldo: Number(c.saldo), fecha: c.creado_en })));
     setGastos((gs || []).map((g) => ({ id: Number(g.id), descripcion: g.descripcion, valor: Number(g.valor), formaPago: g.forma_pago, pagado: g.pagado, fecha: g.creado_en })));
   }, []);
 
-  const cargarEmpleados = useCallback(async () => {
-    const { data } = await supabase.from("profiles").select("id,nombre,rol").order("creado_en");
-    setEmpleados(data || []);
-  }, []);
-
   useEffect(() => {
     if (!session) { setPerfil(null); return; }
     (async () => {
-      const { data } = await supabase.from("profiles").select("nombre,rol").eq("id", session.user.id).single();
-      setPerfil(data || { nombre: session.user.email, rol: "empleado" });
+      const { data } = await supabase.from("profiles").select("nombre").eq("id", session.user.id).single();
+      setPerfil(data || { nombre: session.user.email });
       await cargarTodo();
     })();
   }, [session, cargarTodo]);
-
-  useEffect(() => {
-    if (perfil?.rol === "administrador") cargarEmpleados();
-  }, [perfil, cargarEmpleados]);
 
   // Este cálculo debe declararse SIEMPRE en el mismo orden, antes de cualquier
   // "return" condicional de abajo — es una regla de los Hooks de React.
@@ -241,8 +231,6 @@ function App() {
     return <div className="app-frame flex items-center justify-center"><p className="text-sm text-[#8a7f72]">Cargando tu perfil…</p></div>;
   }
 
-  const esAdmin = perfil.rol === "administrador";
-
   const registrarVenta = async ({ productoId, cantidad, precio, formaPago }) => {
     const prod = productos.find((p) => p.id === Number(productoId));
     if (!prod) return mostrarToast("Selecciona un producto válido", "error");
@@ -257,13 +245,14 @@ function App() {
     mostrarToast(`Venta registrada: ${cantidad} × ${prod.nombre}`);
   };
 
-  const registrarCompra = async ({ productoId, cantidad, precio, formaPago }) => {
+  const registrarCompra = async ({ productoId, cantidad, precio, formaPago, fechaVencimiento }) => {
     const prod = productos.find((p) => p.id === Number(productoId));
     if (!prod) return mostrarToast("Selecciona un producto válido", "error");
     if (cantidad <= 0 || precio <= 0) return mostrarToast("Cantidad y precio deben ser mayores a 0", "error");
     const { error } = await supabase.from("compras").insert({
       producto_id: prod.id, cantidad, precio, forma_pago: formaPago,
       saldo: formaPago === "Crédito" ? cantidad * precio : 0, creado_por: session.user.id,
+      fecha_vencimiento: fechaVencimiento || null,
     });
     if (error) return mostrarToast("No se pudo guardar la compra", "error");
     await cargarTodo();
@@ -285,22 +274,44 @@ function App() {
   const abonarVenta = async (id) => { await supabase.from("ventas").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
   const pagarCompra = async (id) => { await supabase.from("compras").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
   const eliminarGasto = async (id) => { await supabase.from("gastos").delete().eq("id", id); await cargarTodo(); };
-  const cambiarRol = async (id, nuevoRol) => { await supabase.from("profiles").update({ rol: nuevoRol }).eq("id", id); await cargarEmpleados(); };
   const cerrarSesion = async () => { await supabase.auth.signOut(); };
+
+  const agregarProducto = async ({ nombre, stock, costoProm, precioVenta, fechaVencimiento }) => {
+    if (!nombre) return mostrarToast("Escribe un nombre de producto", "error");
+    const { error } = await supabase.from("productos").insert({
+      nombre, stock: Number(stock) || 0, costo_prom: Number(costoProm) || 0, precio_venta: Number(precioVenta) || 0,
+      fecha_vencimiento: fechaVencimiento || null,
+    });
+    if (error) return mostrarToast("No se pudo agregar el producto", "error");
+    await cargarTodo();
+    mostrarToast(`Producto agregado: ${nombre}`);
+  };
+
+  const ajustarStock = async (productoId, delta, fechaVencimiento) => {
+    const prod = productos.find((p) => p.id === Number(productoId));
+    if (!prod) return mostrarToast("Selecciona un producto válido", "error");
+    if (!delta && !fechaVencimiento) return mostrarToast("Ingresa una cantidad o una fecha de vencimiento", "error");
+    const nuevoStock = Math.max(0, prod.stock + (delta || 0));
+    const cambios = { stock: nuevoStock };
+    if (fechaVencimiento) cambios.fecha_vencimiento = fechaVencimiento;
+    const { error } = await supabase.from("productos").update(cambios).eq("id", prod.id);
+    if (error) return mostrarToast("No se pudo ajustar el producto", "error");
+    await cargarTodo();
+    mostrarToast(`${prod.nombre} actualizado.`);
+  };
 
   const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
 
   return (
     <div className="app-frame flex flex-col">
-      <Header pantalla={pantalla} perfil={perfil} esAdmin={esAdmin} onAdmin={() => setPantalla("administracion")} onLogout={cerrarSesion} />
+      <Header pantalla={pantalla} perfil={perfil} onLogout={cerrarSesion} />
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
         {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
         {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} />}
-        {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} onEliminar={esAdmin ? eliminarGasto : null} />}
-        {pantalla === "inventario" && <Inventario productos={productos} />}
-        {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
-        {pantalla === "administracion" && esAdmin && <Administracion empleados={empleados} onCambiarRol={cambiarRol} volver={() => setPantalla("inicio")} />}
+        {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} onEliminar={eliminarGasto} />}
+        {pantalla === "inventario" && <Inventario productos={productos} onAgregarProducto={agregarProducto} onAjustarStock={ajustarStock} />}
+        {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} ventas={ventas} compras={compras} gastos={gastos} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
       </main>
       <NavInferior pantalla={pantalla} ir={setPantalla} alertas={stockBajo.length} />
       {toast && (
@@ -312,9 +323,9 @@ function App() {
   );
 }
 
-const TITULOS = { inicio: "Inicio", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes", administracion: "Administración" };
+const TITULOS = { inicio: "Inicio", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes" };
 
-function Header({ pantalla, perfil, esAdmin, onAdmin, onLogout }) {
+function Header({ pantalla, perfil, onLogout }) {
   return (
     <header className="flex items-center justify-between border-b border-[#e4d9c9] bg-[#faf6f0] px-4 py-3">
       <div className="flex items-center gap-2">
@@ -325,11 +336,6 @@ function Header({ pantalla, perfil, esAdmin, onAdmin, onLogout }) {
         </div>
       </div>
       <div className="flex items-center gap-1">
-        {esAdmin && (
-          <button onClick={onAdmin} className="rounded-full p-1.5 hover:bg-[#f0e9dd]" title="Administración">
-            <Icon name="settings" size={18} color="#6b4f3b" />
-          </button>
-        )}
         <button onClick={onLogout} className="rounded-full p-1.5 hover:bg-[#f0e9dd]" title="Cerrar sesión">
           <Icon name="logout" size={18} color="#6b4f3b" />
         </button>
@@ -372,10 +378,7 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
   ];
   return (
     <div>
-      <p className="mb-1 flex items-center gap-2 text-sm text-[#8a7f72]">
-        Hola, {perfil?.nombre || "bienvenido"}
-        {perfil?.rol === "administrador" && <span className="rounded-full bg-[#eeedfe] px-2 py-0.5 text-[10px] font-medium text-[#3c3489]">Administrador</span>}
-      </p>
+      <p className="mb-1 text-sm text-[#8a7f72]">Hola, {perfil?.nombre || "bienvenido"}</p>
       <p className="font-titulo mb-5 text-xl font-semibold text-[#3b2a22]">Café Tierra Querida</p>
       <div className="mb-5 grid grid-cols-2 gap-3">
         <div className="rounded-xl bg-white p-3">
@@ -480,6 +483,7 @@ function Compras({ productos, compras, onRegistrar }) {
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
+  const [vencimiento, setVencimiento] = useState("");
   const [interpretando, setInterpretando] = useState(false);
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
@@ -503,7 +507,7 @@ function Compras({ productos, compras, onRegistrar }) {
     if (prec) setPrecio(String(prec));
     if (pago) setFormaPago(pago);
   };
-  const guardar = () => { onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago }); setCantidad(""); setPrecio(""); };
+  const guardar = () => { onRegistrar({ productoId: Number(productoId), cantidad: Number(cantidad), precio: Number(precio), formaPago, fechaVencimiento: vencimiento || null }); setCantidad(""); setPrecio(""); setVencimiento(""); };
 
   return (
     <div>
@@ -525,6 +529,7 @@ function Compras({ productos, compras, onRegistrar }) {
         <Campo label="Forma de pago">
           <select className={inputCls} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
         </Campo>
+        <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
         <button onClick={guardar} className="mt-1 w-full rounded-lg py-2.5 text-sm font-medium text-white" style={{ background: COLOR }}>Guardar compra</button>
       </div>
       <p className="mb-2 mt-5 text-xs font-medium text-[#8a7f72]">Compras recientes</p>
@@ -597,20 +602,68 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
   );
 }
 
-function Inventario({ productos }) {
+const DIAS_ALERTA_VENCIMIENTO = 15;
+
+function diasParaVencer(fechaStr) {
+  if (!fechaStr) return null;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const f = new Date(fechaStr + "T00:00:00");
+  return Math.round((f - hoy) / (1000 * 60 * 60 * 24));
+}
+
+function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
   const stockBajo = productos.filter((p) => p.stock < STOCK_MINIMO);
+  const porVencer = productos.filter((p) => {
+    const dias = diasParaVencer(p.fechaVencimiento);
+    return dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
+  });
   const maxStock = Math.max(...productos.map((p) => p.stock), 1);
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const [modo, setModo] = useState("ajustar");
+
+  // Ajustar stock / vencimiento de un producto existente
+  const [productoId, setProductoId] = useState(productos[0]?.id);
+  const [delta, setDelta] = useState("");
+  const [vencimientoAjuste, setVencimientoAjuste] = useState("");
+
+  // Producto nuevo
+  const [nombre, setNombre] = useState("");
+  const [stockInicial, setStockInicial] = useState("");
+  const [costoInicial, setCostoInicial] = useState("");
+  const [precioInicial, setPrecioInicial] = useState("");
+  const [vencimientoInicial, setVencimientoInicial] = useState("");
+
+  useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
+
+  const guardarAjuste = () => {
+    onAjustarStock(Number(productoId), Number(delta) || 0, vencimientoAjuste || null);
+    setDelta(""); setVencimientoAjuste("");
+  };
+  const guardarNuevo = () => {
+    onAgregarProducto({ nombre, stock: stockInicial, costoProm: costoInicial, precioVenta: precioInicial, fechaVencimiento: vencimientoInicial || null });
+    setNombre(""); setStockInicial(""); setCostoInicial(""); setPrecioInicial(""); setVencimientoInicial("");
+  };
+
   return (
     <div>
       {stockBajo.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg bg-[#faece7] px-3 py-2.5 text-sm text-[#993c1d]">
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-[#faece7] px-3 py-2.5 text-sm text-[#993c1d]">
           <Icon name="alert-triangle" size={16} />
           <span>{stockBajo.length} producto(s) con stock por debajo de {STOCK_MINIMO} unidades</span>
+        </div>
+      )}
+      {porVencer.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg bg-[#faeeda] px-3 py-2.5 text-sm text-[#854f0b]">
+          <Icon name="alert-triangle" size={16} />
+          <span>{porVencer.length} producto(s) vencidos o próximos a vencer (≤ {DIAS_ALERTA_VENCIMIENTO} días)</span>
         </div>
       )}
       <div className="space-y-3">
         {productos.map((p) => {
           const bajo = p.stock < STOCK_MINIMO;
+          const dias = diasParaVencer(p.fechaVencimiento);
+          const vence = dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
           return (
             <div key={p.id} className="rounded-xl bg-white p-3">
               <div className="mb-1.5 flex items-center justify-between">
@@ -621,11 +674,61 @@ function Inventario({ productos }) {
                 <div className={`h-full rounded-full ${bajo ? "bg-[#c9583d]" : "bg-[#6b9950]"}`} style={{ width: `${Math.min(100, (p.stock / maxStock) * 100)}%` }} />
               </div>
               <p className="mt-1.5 text-xs text-[#8a7f72]">Costo promedio: {money(p.costoProm)} · Venta: {money(p.precioVenta)}</p>
+              {p.fechaVencimiento && (
+                <p className={`mt-1 text-xs ${vence ? "font-medium text-[#993c1d]" : "text-[#8a7f72]"}`}>
+                  {dias < 0 ? `Venció hace ${Math.abs(dias)} días` : dias === 0 ? "Vence hoy" : `Vence en ${dias} días`} ({p.fechaVencimiento})
+                </p>
+              )}
             </div>
           );
         })}
       </div>
       <p className="mt-4 text-xs text-[#8a7f72]">El inventario se actualiza automáticamente con cada compra (entrada) y cada venta (salida). El costo promedio se recalcula por compra.</p>
+
+      <div className="mt-5">
+        {!mostrarForm ? (
+          <button onClick={() => setMostrarForm(true)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[#d8cbb8] py-2.5 text-sm text-[#6b4f3b]">
+            <Icon name="package" size={16} /> Registrar inventario manual
+          </button>
+        ) : (
+          <div className="rounded-xl bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-[#3b2a22]">Inventario manual</p>
+              <button onClick={() => setMostrarForm(false)} className="text-xs text-[#8a7f72]">Cerrar</button>
+            </div>
+            <div className="mb-3 flex gap-2">
+              <button onClick={() => setModo("ajustar")} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${modo === "ajustar" ? "bg-[#6b4f3b] text-white" : "bg-[#f0e9dd] text-[#6b4f3b]"}`}>Ajustar existente</button>
+              <button onClick={() => setModo("nuevo")} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${modo === "nuevo" ? "bg-[#6b4f3b] text-white" : "bg-[#f0e9dd] text-[#6b4f3b]"}`}>Producto nuevo</button>
+            </div>
+
+            {modo === "ajustar" ? (
+              <>
+                <p className="mb-3 text-xs text-[#8a7f72]">Para corregir un conteo físico, registrar inventario sin factura, o actualizar la fecha de vencimiento.</p>
+                <Campo label="Producto">
+                  <select className={inputCls} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+                    {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre} (actual: {p.stock} u)</option>)}
+                  </select>
+                </Campo>
+                <Campo label="Cantidad a sumar o restar (opcional)"><input className={inputCls} value={delta} onChange={(e) => setDelta(e.target.value)} placeholder="Ej: 20 o -5" inputMode="numeric" /></Campo>
+                <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimientoAjuste} onChange={(e) => setVencimientoAjuste(e.target.value)} /></Campo>
+                <button onClick={guardarAjuste} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Aplicar</button>
+              </>
+            ) : (
+              <>
+                <p className="mb-3 text-xs text-[#8a7f72]">Para dar de alta un producto que no existía en el catálogo, con su inventario inicial.</p>
+                <Campo label="Nombre del producto"><input className={inputCls} value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
+                <div className="flex gap-3">
+                  <div className="flex-1"><Campo label="Stock inicial"><input className={inputCls} value={stockInicial} onChange={(e) => setStockInicial(e.target.value)} inputMode="numeric" /></Campo></div>
+                  <div className="flex-1"><Campo label="Costo promedio"><input className={inputCls} value={costoInicial} onChange={(e) => setCostoInicial(e.target.value)} inputMode="numeric" /></Campo></div>
+                </div>
+                <Campo label="Precio de venta"><input className={inputCls} value={precioInicial} onChange={(e) => setPrecioInicial(e.target.value)} inputMode="numeric" /></Campo>
+                <Campo label="Fecha de vencimiento (opcional)"><input className={inputCls} type="date" value={vencimientoInicial} onChange={(e) => setVencimientoInicial(e.target.value)} /></Campo>
+                <button onClick={guardarNuevo} className="mt-1 w-full rounded-lg bg-[#6b4f3b] py-2.5 text-sm font-medium text-white hover:bg-[#5a4230]">Agregar producto</button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -668,12 +771,63 @@ function GraficoSemana({ series }) {
   );
 }
 
-function Reportes({ reportes, productos, onAbonarVenta, onPagarCompra }) {
+function dentroDePeriodo(fechaStr, periodo) {
+  if (!fechaStr) return false;
+  const f = new Date(fechaStr);
+  const hoy = new Date();
+  if (periodo === "dia") {
+    return f.toDateString() === hoy.toDateString();
+  }
+  if (periodo === "semana") {
+    const diffDias = (hoy - f) / (1000 * 60 * 60 * 24);
+    return diffDias >= 0 && diffDias < 7;
+  }
+  if (periodo === "mes") {
+    return f.getFullYear() === hoy.getFullYear() && f.getMonth() === hoy.getMonth();
+  }
+  return true;
+}
+
+function FlujoCaja({ ventas, compras, gastos, volver }) {
+  const [periodo, setPeriodo] = useState("dia");
+  const PERIODOS = [{ id: "dia", label: "Día" }, { id: "semana", label: "Semana" }, { id: "mes", label: "Mes" }];
+
+  const calculo = useMemo(() => {
+    const ingresos = ventas.filter((v) => v.formaPago === "Efectivo" && dentroDePeriodo(v.fecha, periodo)).reduce((s, v) => s + v.cantidad * v.precio, 0);
+    const comprasEf = compras.filter((c) => c.formaPago === "Efectivo" && dentroDePeriodo(c.fecha, periodo)).reduce((s, c) => s + c.cantidad * c.precio, 0);
+    const gastosEf = gastos.filter((g) => g.formaPago === "Efectivo" && dentroDePeriodo(g.fecha, periodo)).reduce((s, g) => s + g.valor, 0);
+    return { ingresos, comprasEf, gastosEf, total: ingresos - comprasEf - gastosEf };
+  }, [ventas, compras, gastos, periodo]);
+
+  return (
+    <div>
+      <button onClick={volver} className="mb-3 text-sm text-[#6b4f3b]">← Volver a reportes</button>
+      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Flujo de Caja</p>
+      <div className="mb-4 flex gap-2">
+        {PERIODOS.map((p) => (
+          <button key={p.id} onClick={() => setPeriodo(p.id)} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${periodo === p.id ? "bg-[#6b4f3b] text-white" : "bg-white text-[#6b4f3b]"}`}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="rounded-xl bg-white p-4">
+        <Linea label="Ingresos recibidos en efectivo" valor={calculo.ingresos} />
+        <Linea label="Compras pagadas en efectivo" valor={-calculo.comprasEf} />
+        <Linea label="Gastos pagados en efectivo" valor={-calculo.gastosEf} />
+        <div className="mt-1 border-t border-[#e4d9c9] pt-1.5"><Linea label="Total en caja" valor={calculo.total} fuerte /></div>
+      </div>
+      <p className="mt-3 text-xs text-[#8a7f72]">Solo cuenta movimientos pagados en efectivo — las ventas/compras a crédito o por Nequi/tarjeta no mueven la caja física.</p>
+    </div>
+  );
+}
+
+function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta, onPagarCompra }) {
   const [vista, setVista] = useState("resumen");
   const { totalVentas, totalCosto, totalGastos, utilidad, caja, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
 
   if (vista === "cobrar") return <ListaCuentas titulo="Cuentas por cobrar" items={cuentasPorCobrar} productos={productos} tipo="cobrar" onAccion={onAbonarVenta} volver={() => setVista("resumen")} />;
   if (vista === "pagar") return <ListaCuentas titulo="Cuentas por pagar" items={cuentasPorPagar} productos={productos} tipo="pagar" onAccion={onPagarCompra} volver={() => setVista("resumen")} />;
+  if (vista === "flujo") return <FlujoCaja ventas={ventas} compras={compras} gastos={gastos} volver={() => setVista("resumen")} />;
 
   return (
     <div>
@@ -697,6 +851,10 @@ function Reportes({ reportes, productos, onAbonarVenta, onPagarCompra }) {
         <Linea label="Gastos" valor={-totalGastos} />
         <div className="mt-1 border-t border-[#e4d9c9] pt-1.5"><Linea label="Utilidad" valor={utilidad} fuerte /></div>
       </div>
+      <button onClick={() => setVista("flujo")} className="mb-2 flex w-full items-center justify-between rounded-lg bg-white px-3 py-3 text-sm">
+        <span className="flex items-center gap-2 text-[#3b2a22]"><Icon name="chart-bar" size={16} color="#185fa5" /> Flujo de Caja</span>
+        <Icon name="chevron-right" size={14} color="#8a7f72" />
+      </button>
       <button onClick={() => setVista("cobrar")} className="mb-2 flex w-full items-center justify-between rounded-lg bg-white px-3 py-3 text-sm">
         <span className="flex items-center gap-2 text-[#3b2a22]"><Icon name="users" size={16} color="#185fa5" /> Cuentas por cobrar</span>
         <span className="flex items-center gap-1 text-[#8a7f72]">{cuentasPorCobrar.length} <Icon name="chevron-right" size={14} /></span>
@@ -740,35 +898,6 @@ function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function Administracion({ empleados, onCambiarRol, volver }) {
-  return (
-    <div>
-      <button onClick={volver} className="mb-3 text-sm text-[#6b4f3b]">← Volver</button>
-      <p className="mb-3 text-sm font-medium text-[#3b2a22]">Equipo</p>
-      <div className="space-y-2">
-        {empleados.map((e) => (
-          <div key={e.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 text-sm">
-            <div>
-              <p className="text-[#3b2a22]">{e.nombre}</p>
-              <p className="text-xs capitalize text-[#8a7f72]">{e.rol}</p>
-            </div>
-            <button
-              onClick={() => onCambiarRol(e.id, e.rol === "administrador" ? "empleado" : "administrador")}
-              className="rounded-md border border-[#e4d9c9] px-2 py-1 text-xs text-[#6b4f3b]"
-            >
-              {e.rol === "administrador" ? "Quitar admin" : "Hacer admin"}
-            </button>
-          </div>
-        ))}
-      </div>
-      <p className="mt-4 text-xs text-[#8a7f72]">
-        Para crear un nuevo empleado: ve al panel de Supabase → Authentication → Users → Add user,
-        con su correo y una contraseña. Queda automáticamente como empleado.
-      </p>
     </div>
   );
 }
