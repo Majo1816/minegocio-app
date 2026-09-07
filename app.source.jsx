@@ -76,6 +76,26 @@ function saludoPorHora() {
   return "Buenas noches — cerrando con buen aroma";
 }
 
+// ---------- Reporte por período, reutilizable dentro de cada módulo ----------
+function usePeriodoReporte(items, montoFn) {
+  const [periodo, setPeriodo] = useState("dia");
+  const filtrados = useMemo(() => items.filter((it) => dentroDePeriodo(it.fecha, periodo)), [items, periodo]);
+  const total = useMemo(() => filtrados.reduce((s, it) => s + montoFn(it), 0), [filtrados, montoFn]);
+  return { periodo, setPeriodo, filtrados, total };
+}
+
+const PERIODOS = [{ id: "dia", label: "Día" }, { id: "semana", label: "Semana" }, { id: "mes", label: "Mes" }];
+
+function TabsPeriodo({ periodo, setPeriodo }) {
+  return (
+    <div className="period-tabs">
+      {PERIODOS.map((p) => (
+        <button key={p.id} type="button" className={`period-tab ${periodo === p.id ? "active" : ""}`} onClick={() => setPeriodo(p.id)}>{p.label}</button>
+      ))}
+    </div>
+  );
+}
+
 // ---------- Reconocimiento de voz ----------
 function useVoz(onTexto) {
   const [escuchando, setEscuchando] = useState(false);
@@ -375,8 +395,24 @@ function App() {
   };
 
   const pagarGasto = async (id) => { await supabase.from("gastos").update({ pagado: true }).eq("id", id); await cargarTodo(); };
-  const abonarVenta = async (id) => { await supabase.from("ventas").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
-  const pagarCompra = async (id) => { await supabase.from("compras").update({ saldo: 0 }).eq("id", id); await cargarTodo(); };
+  const abonarVenta = async (id, monto) => {
+    const venta = ventas.find((v) => v.id === id);
+    if (!venta) return;
+    const nuevoSaldo = Math.max(0, venta.saldo - (Number(monto) || 0));
+    const { error } = await supabase.from("ventas").update({ saldo: nuevoSaldo }).eq("id", id);
+    if (error) return mostrarToast("No se pudo registrar el abono", "error");
+    await cargarTodo();
+    mostrarToast(`Abono registrado: ${money(monto)}${nuevoSaldo > 0 ? ` · Saldo restante: ${money(nuevoSaldo)}` : " · Saldado por completo"}`);
+  };
+  const pagarCompra = async (id, monto) => {
+    const compra = compras.find((c) => c.id === id);
+    if (!compra) return;
+    const nuevoSaldo = Math.max(0, compra.saldo - (Number(monto) || 0));
+    const { error } = await supabase.from("compras").update({ saldo: nuevoSaldo }).eq("id", id);
+    if (error) return mostrarToast("No se pudo registrar el pago", "error");
+    await cargarTodo();
+    mostrarToast(`Pago registrado: ${money(monto)}${nuevoSaldo > 0 ? ` · Saldo restante: ${money(nuevoSaldo)}` : " · Saldado por completo"}`);
+  };
   const eliminarGasto = async (id) => { await supabase.from("gastos").delete().eq("id", id); await cargarTodo(); };
   const cerrarSesion = async () => { await supabase.auth.signOut(); };
 
@@ -446,6 +482,8 @@ function NavInferior({ pantalla, ir, alertas }) {
   const items = [
     { id: "inicio", icon: "home", label: "Inicio" },
     { id: "ingresos", icon: "arrowDown", label: "Ingresos" },
+    { id: "compras", icon: "cart", label: "Compras", extra: true },
+    { id: "gastos", icon: "receipt", label: "Gastos", extra: true },
     { id: "inventario", icon: "package", label: "Inventario", badge: alertas },
     { id: "reportes", icon: "bars", label: "Reportes" },
   ];
@@ -454,9 +492,11 @@ function NavInferior({ pantalla, ir, alertas }) {
       {items.map((it) => {
         const activo = pantalla === it.id;
         return (
-          <button key={it.id} type="button" className={`nav-btn ${activo ? "active" : ""}`} onClick={() => ir(it.id)} style={{ position: "relative" }}>
-            <Icon name={it.icon} size={20} color={activo ? "var(--espresso-900)" : "var(--espresso-600)"} />
-            {it.badge > 0 && <span style={{ position: "absolute", top: 2, right: "26%", width: 16, height: 16, borderRadius: "50%", background: "var(--cherry)", color: "#fff", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{it.badge}</span>}
+          <button key={it.id} type="button" className={`nav-btn ${activo ? "active" : ""} ${it.extra ? "nav-extra" : ""}`} onClick={() => ir(it.id)}>
+            <span style={{ position: "relative", display: "inline-flex" }}>
+              <Icon name={it.icon} size={20} color={activo ? "var(--espresso-900)" : "var(--espresso-600)"} />
+              {it.badge > 0 && <span style={{ position: "absolute", top: -5, right: -7, width: 15, height: 15, borderRadius: "50%", background: "var(--cherry)", color: "#fff", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{it.badge}</span>}
+            </span>
             <span>{it.label}</span>
           </button>
         );
@@ -516,6 +556,8 @@ function Ingresos({ productos, ventas, onRegistrar }) {
   const [precio, setPrecio] = useState("");
   const [formaPago, setFormaPago] = useState("Efectivo");
   const [llenado, setLlenado] = useState({});
+  const montoVenta = useCallback((v) => v.cantidad * v.precio, []);
+  const reporte = usePeriodoReporte(ventas, montoVenta);
 
   useEffect(() => { if (!productoId && productos[0]) setProductoId(productos[0].id); }, [productos, productoId]);
 
@@ -562,9 +604,14 @@ function Ingresos({ productos, ventas, onRegistrar }) {
         </Campo>
         <button type="button" className="submit-btn" style={{ marginTop: 6 }} onClick={guardar}>Guardar venta</button>
       </div>
-      <p className="list-title">Ventas recientes</p>
-      {ventas.length === 0 && <p className="list-empty">Aún no has registrado ninguna venta.</p>}
-      {ventas.slice(0, 6).map((v) => {
+      <p className="list-title">Reporte de ventas</p>
+      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+      <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)", marginBottom: 16 }}>
+        <p className="stat-label">{reporte.filtrados.length} venta{reporte.filtrados.length === 1 ? "" : "s"}</p>
+        <p className="stat-value">{money(reporte.total)}</p>
+      </div>
+      {reporte.filtrados.length === 0 && <p className="list-empty">No hay ventas en este período.</p>}
+      {reporte.filtrados.slice(0, 20).map((v) => {
         const prod = productos.find((p) => p.id === v.productoId);
         return (
           <div key={v.id} className="list-row">
@@ -584,6 +631,8 @@ function Compras({ productos, compras, onRegistrar, onAgregarProducto }) {
   const [formaPago, setFormaPago] = useState("Efectivo");
   const [vencimiento, setVencimiento] = useState("");
   const [llenado, setLlenado] = useState({});
+  const montoCompra = useCallback((c) => c.cantidad * c.precio, []);
+  const reporte = usePeriodoReporte(compras, montoCompra);
 
   const [mostrarNuevo, setMostrarNuevo] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
@@ -670,9 +719,14 @@ function Compras({ productos, compras, onRegistrar, onAgregarProducto }) {
         <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
         <button type="button" className="submit-btn cherry" style={{ marginTop: 6 }} onClick={guardar}>Guardar compra</button>
       </div>
-      <p className="list-title">Compras recientes</p>
-      {compras.length === 0 && <p className="list-empty">Aún no has registrado ninguna compra.</p>}
-      {compras.slice(0, 6).map((c) => {
+      <p className="list-title">Reporte de compras</p>
+      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+      <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)", marginBottom: 16 }}>
+        <p className="stat-label">{reporte.filtrados.length} compra{reporte.filtrados.length === 1 ? "" : "s"}</p>
+        <p className="stat-value">{money(reporte.total)}</p>
+      </div>
+      {reporte.filtrados.length === 0 && <p className="list-empty">No hay compras en este período.</p>}
+      {reporte.filtrados.slice(0, 20).map((c) => {
         const prod = productos.find((p) => p.id === c.productoId);
         return (
           <div key={c.id} className="list-row">
@@ -690,6 +744,8 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
   const [valor, setValor] = useState("");
   const [formaPago, setFormaPago] = useState("Nequi");
   const [llenado, setLlenado] = useState({});
+  const montoGasto = useCallback((g) => g.valor, []);
+  const reporte = usePeriodoReporte(gastos, montoGasto);
 
   const procesarVoz = async (texto) => {
     const resultado = await interpretarConGemini(texto, "gasto", null);
@@ -722,8 +778,14 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
         </div>
         <button type="button" className="submit-btn caramel" style={{ marginTop: 6 }} onClick={guardar}>Guardar gasto</button>
       </div>
-      <p className="list-title">Gastos del mes</p>
-      {gastos.map((g) => (
+      <p className="list-title">Reporte de gastos</p>
+      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+      <div className="stat-card" style={{ borderLeft: "3px solid var(--caramel)", marginBottom: 16 }}>
+        <p className="stat-label">{reporte.filtrados.length} gasto{reporte.filtrados.length === 1 ? "" : "s"}</p>
+        <p className="stat-value">{money(reporte.total)}</p>
+      </div>
+      {reporte.filtrados.length === 0 && <p className="list-empty">No hay gastos en este período.</p>}
+      {reporte.filtrados.slice(0, 20).map((g) => (
         <div key={g.id} className="list-row">
           <div><div className="li-main">{g.descripcion}</div><div className="li-sub">{g.formaPago}{!g.pagado ? " · pendiente" : ""}</div></div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -874,7 +936,6 @@ function VolverBoton({ onClick }) {
 
 function FlujoCaja({ ventas, compras, gastos, volver }) {
   const [periodo, setPeriodo] = useState("dia");
-  const PERIODOS = [{ id: "dia", label: "Día" }, { id: "semana", label: "Semana" }, { id: "mes", label: "Mes" }];
   const calculo = useMemo(() => {
     const ingresos = ventas.filter((v) => v.formaPago === "Efectivo" && dentroDePeriodo(v.fecha, periodo)).reduce((s, v) => s + v.cantidad * v.precio, 0);
     const comprasEf = compras.filter((c) => c.formaPago === "Efectivo" && dentroDePeriodo(c.fecha, periodo)).reduce((s, c) => s + c.cantidad * c.precio, 0);
@@ -886,9 +947,7 @@ function FlujoCaja({ ventas, compras, gastos, volver }) {
     <div>
       <VolverBoton onClick={volver} />
       <p className="list-title">Flujo de Caja</p>
-      <div className="period-tabs">
-        {PERIODOS.map((p) => <button key={p.id} type="button" className={`period-tab ${periodo === p.id ? "active" : ""}`} onClick={() => setPeriodo(p.id)}>{p.label}</button>)}
-      </div>
+      <TabsPeriodo periodo={periodo} setPeriodo={setPeriodo} />
       <div className="form-card">
         <Linea label="Ingresos recibidos en efectivo" valor={calculo.ingresos} />
         <Linea label="Compras pagadas en efectivo" valor={-calculo.comprasEf} />
@@ -901,6 +960,7 @@ function FlujoCaja({ ventas, compras, gastos, volver }) {
 }
 
 function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
+  const [montos, setMontos] = useState({});
   return (
     <div>
       <VolverBoton onClick={volver} />
@@ -910,6 +970,7 @@ function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
         const prod = tipo === "cobrar" || it.tipo === "Compra" ? productos.find((p) => p.id === it.productoId) : null;
         const nombre = it.tipo === "Gasto" ? it.descripcion : prod?.nombre;
         const accionable = (tipo === "cobrar" && it.saldo > 0) || (tipo === "pagar" && it.tipo === "Compra" && it.saldo > 0);
+        const montoActual = montos[it.id] ?? it.saldo;
         return (
           <div key={it.id} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -917,9 +978,24 @@ function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
               <span className="li-amount" style={{ color: "var(--cherry)" }}>{money(it.saldo)}</span>
             </div>
             {accionable && (
-              <button type="button" className="submit-btn ghost" style={{ width: "auto", alignSelf: "flex-start", padding: "7px 12px", fontSize: "0.78rem" }} onClick={() => onAccion(it.id, it.saldo)}>
-                {tipo === "cobrar" ? "Registrar abono total" : "Registrar pago total"}
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  value={montoActual}
+                  max={it.saldo}
+                  min={0}
+                  onChange={(e) => setMontos((m) => ({ ...m, [it.id]: e.target.value }))}
+                  style={{ width: 110, padding: "7px 10px", borderRadius: 8, border: "1.5px solid var(--cream-dim)", fontSize: "0.8rem", fontFamily: "'Karla', sans-serif" }}
+                />
+                <button
+                  type="button"
+                  className="submit-btn ghost"
+                  style={{ width: "auto", padding: "7px 12px", fontSize: "0.78rem" }}
+                  onClick={() => onAccion(it.id, Math.min(Number(montoActual) || 0, it.saldo))}
+                >
+                  {tipo === "cobrar" ? "Registrar abono" : "Registrar pago"}
+                </button>
+              </div>
             )}
           </div>
         );
