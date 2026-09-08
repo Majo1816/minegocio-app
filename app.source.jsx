@@ -648,7 +648,7 @@ function Inicio({ productos, ventas, stockBajo, ir, perfil }) {
       <div className="modules" style={{ marginBottom: 18 }}>
         {tiles.map((t) => (
           <button key={t.id} type="button" className={`mod-card ${t.clase}`} onClick={() => ir(t.id)}>
-            <div className="mod-icon-wrap"><Icon name={t.icon} size={21} color="currentColor" /></div>
+            <div className="mod-icon-wrap"><Icon name={t.icon} size={23} color="currentColor" /></div>
             <span className="mod-label">{t.label}</span>
           </button>
         ))}
