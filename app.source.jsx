@@ -29,13 +29,16 @@ function detectarFormaPago(texto) {
   if (t.includes("efectivo")) return "Efectivo";
   return null;
 }
+const PALABRAS_GENERICAS_PRODUCTO = new Set(["cafe", "granos", "grano", "en"]);
 function detectarProducto(texto, productos) {
   const t = normalizar(texto);
   let mejor = null;
+  let mejorPuntaje = 0;
   for (const p of productos) {
-    const claves = normalizar(p.nombre).split(" ").filter((w) => w.length > 3);
-    for (const clave of claves) { if (t.includes(clave)) { mejor = p; break; } }
-    if (mejor) break;
+    const palabras = normalizar(p.nombre).split(/\s+/).filter((w) => w.length > 3 && !PALABRAS_GENERICAS_PRODUCTO.has(w));
+    let puntaje = 0;
+    for (const palabra of palabras) { if (t.includes(palabra)) puntaje++; }
+    if (puntaje > mejorPuntaje) { mejorPuntaje = puntaje; mejor = p; }
   }
   return mejor;
 }
@@ -520,7 +523,7 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
     await new Promise((r) => setTimeout(r, 350));
     if (t.includes("stock") || t.includes("inventario")) return `Tienes ${totalStock} unidades en inventario.`;
     if (t.includes("alerta")) return `${stockBajo.length} producto(s) con stock bajo.`;
-    if (t.includes("ganancia") || t.includes("utilidad")) return "Entra a Reportes para ver tu utilidad actual.";
+    if (t.includes("ganancia") || t.includes("utilidad") || t.includes("gasto")) return "Entra a Reportes para ver tu utilidad y tus gastos.";
     return "Puedo ayudarte con ventas, compras, gastos, inventario o reportes.";
   };
 
@@ -577,7 +580,8 @@ function Ingresos({ productos, ventas, onRegistrar }) {
     if (pago) { setFormaPago(pago); flags.pago = true; }
     setLlenado((prev) => ({ ...prev, ...flags }));
     if (cant && prec) return `Formulario listo · Total: ${money(cant * prec)}`;
-    return "Formulario actualizado";
+    if (Object.keys(flags).length > 0) return "Formulario actualizado con lo que entendí";
+    return "No reconocí datos de venta — di producto, cantidad, precio y forma de pago";
   };
 
   const guardar = () => {
@@ -662,7 +666,8 @@ function Compras({ productos, compras, onRegistrar, onAgregarProducto }) {
     if (pago) { setFormaPago(pago); flags.pago = true; }
     setLlenado((prev) => ({ ...prev, ...flags }));
     if (cant && prec) return `Formulario listo · Total: ${money(cant * prec)}`;
-    return "Formulario actualizado";
+    if (Object.keys(flags).length > 0) return "Formulario actualizado con lo que entendí";
+    return "No reconocí datos de compra — di producto, cantidad, precio y forma de pago";
   };
 
   const guardar = () => {
@@ -771,7 +776,8 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
     if (pago) { setFormaPago(pago); flags.pago = true; }
     setLlenado((prev) => ({ ...prev, ...flags }));
     if (val) return `Gasto listo · ${money(val)}`;
-    return "Formulario actualizado";
+    if (Object.keys(flags).length > 0) return "Formulario actualizado con lo que entendí";
+    return "No reconocí datos de gasto — di la descripción, el valor y la forma de pago";
   };
 
   const guardar = () => { onRegistrar({ descripcion, valor: Number(valor), formaPago }); setDescripcion(""); setValor(""); setLlenado({}); };
@@ -1025,6 +1031,18 @@ function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta,
   const [vista, setVista] = useState("resumen");
   const { totalVentas, totalGastos, utilidad, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
 
+  const procesarConsulta = async (texto) => {
+    const t = normalizar(texto);
+    await new Promise((r) => setTimeout(r, 300));
+    if (t.includes("ganancia") || t.includes("utilidad")) return `Tu utilidad acumulada es ${money(utilidad)}.`;
+    if (t.includes("venta")) return `Tus ventas acumuladas suman ${money(totalVentas)}.`;
+    if (t.includes("gasto")) return `Tus gastos acumulados suman ${money(totalGastos)}.`;
+    if (t.includes("caja") || t.includes("efectivo")) return "Entra a Flujo de Caja para ver el detalle por día, semana o mes.";
+    if (t.includes("cobrar") || t.includes("deben")) return `Tienes ${cuentasPorCobrar.length} cuenta(s) por cobrar pendientes.`;
+    if (t.includes("pagar") || t.includes("debo") || t.includes("debemos")) return `Tienes ${cuentasPorPagar.length} cuenta(s) por pagar pendientes.`;
+    return "Puedo contarte sobre ventas, gastos, ganancia, caja o cuentas pendientes.";
+  };
+
   if (vista === "cobrar") return <ListaCuentas titulo="Cuentas por cobrar" items={cuentasPorCobrar} productos={productos} tipo="cobrar" onAccion={onAbonarVenta} volver={() => setVista("resumen")} />;
   if (vista === "pagar") return <ListaCuentas titulo="Cuentas por pagar" items={cuentasPorPagar} productos={productos} tipo="pagar" onAccion={onPagarCompra} volver={() => setVista("resumen")} />;
   if (vista === "flujo") return <FlujoCaja ventas={ventas} compras={compras} gastos={gastos} volver={() => setVista("resumen")} />;
@@ -1033,7 +1051,7 @@ function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta,
     <div className="page-grid">
       <div className="page-main">
         <div className="info-banner plum"><Icon name="bars" size={18} color="var(--plum)" /><span>Resumen de tu negocio — ventas, gastos y ganancia</span></div>
-        <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={async () => `Tu utilidad acumulada es ${money(utilidad)}.`} />
+        <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={procesarConsulta} />
 
         <div className="stats3">
           <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentas)}</p></div>
