@@ -54,29 +54,6 @@ html, body{
   .phone{ min-height:90vh; border-radius:28px; overflow:hidden; }
 }
 
-/* ---------- Escritorio: barra lateral en vez de barra inferior ---------- */
-@media (min-width:900px){
-  #root{ padding:0; background:#EDE4D3; align-items:center; }
-  .phone{
-    max-width:1180px; width:100%; min-height:100vh; border-radius:20px; overflow:hidden;
-    display:grid; grid-template-columns:230px 1fr; grid-template-rows:auto 1fr;
-    grid-template-areas:"header header" "nav content"; box-shadow:0 30px 70px -30px rgba(42,24,16,0.35);
-  }
-  .header{ grid-area:header; padding:22px 36px; }
-  .content{ grid-area:content; padding:28px 40px 36px; }
-  .bottom-nav{
-    grid-area:nav; flex-direction:column; align-items:stretch; justify-content:flex-start;
-    border-top:none; border-right:1px solid var(--cream-dim); padding:22px 14px; gap:4px;
-  }
-  .nav-btn{ flex-direction:row; justify-content:flex-start; gap:12px; padding:11px 14px; border-radius:12px; }
-  .nav-btn span{ font-size:0.88rem; }
-  .nav-extra{ display:flex !important; }
-  .modules{ grid-template-columns:repeat(3, 1fr); }
-  .form-card{ max-width:560px; }
-  .assistant{ max-width:640px; }
-  .stats3{ max-width:720px; }
-}
-
 /* ---------- Header ---------- */
 .header{
   display:flex; align-items:center; gap:12px;
@@ -234,6 +211,10 @@ html, body{
 .report-link .rl-left{ display:flex; align-items:center; gap:10px; font-weight:600; color:var(--espresso-900); font-size:0.9rem; }
 .report-link .rl-right{ display:flex; align-items:center; gap:6px; color:var(--espresso-600); font-size:0.85rem; }
 
+/* ---------- Layout de dos columnas (se activa solo en escritorio) ---------- */
+.page-grid{ display:block; }
+.page-side{ margin-top:24px; }
+
 /* ---------- Module tiles (home) ---------- */
 .modules{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .mod-card{ border-radius:18px; padding:20px 16px; display:flex; flex-direction:column; align-items:flex-start; gap:14px; cursor:pointer; border:none; text-align:left; font-family:'Karla', sans-serif; transition:transform 0.14s ease, box-shadow 0.14s ease; }
@@ -313,3 +294,55 @@ html, body{
 @media (prefers-reduced-motion: reduce){
   .assistant-mic::before, .waveform span, .steam-line, .coffee-fill{ animation:none; }
 }
+
+/* ============================================================
+   Escritorio: barra lateral en vez de barra inferior.
+   Este bloque va AL FINAL del archivo a propósito: en CSS, cuando dos
+   reglas con la misma especificidad afectan la misma propiedad, gana la
+   que aparece más abajo en el archivo — sin importar si está dentro de
+   un @media. Si este bloque quedara antes de las reglas base (.nav-btn,
+   .content, .modules, etc.), esas reglas base lo pisarían por completo.
+   ============================================================ */
+@media (min-width:900px){
+  #root{ padding:0; background:#EDE4D3; align-items:center; }
+
+  .phone{
+    max-width:1040px; width:100%; min-height:100vh; border-radius:20px; overflow:hidden;
+    display:grid; grid-template-columns:210px 1fr; grid-template-rows:auto 1fr;
+    grid-template-areas:"header header" "nav content";
+    box-shadow:0 30px 70px -30px rgba(42,24,16,0.35);
+  }
+
+  .header{ grid-area:header; padding:20px 36px; }
+
+  .content{
+    grid-area:content; padding:32px 40px 40px;
+    max-width:700px; width:100%; margin:0 auto;
+  }
+
+  .bottom-nav{
+    grid-area:nav; flex-direction:column; align-items:stretch; justify-content:flex-start;
+    border-top:none; border-right:1px solid var(--cream-dim); padding:20px 12px; gap:2px;
+  }
+
+  .nav-btn{
+    flex:0 0 auto; flex-direction:row; justify-content:flex-start; align-items:center;
+    gap:12px; padding:11px 14px; border-radius:12px;
+  }
+  .nav-btn span{ font-size:0.88rem; }
+  .nav-extra{ display:flex; }
+
+  .modules{ grid-template-columns:repeat(3, 1fr); }
+  .form-card{ max-width:560px; }
+  .assistant{ max-width:640px; }
+  .stats3{ max-width:640px; }
+  .stats{ max-width:520px; }
+
+  /* Layout en dos columnas: formulario/acción principal a la izquierda,
+     reporte o lista secundaria a la derecha — en vez de una sola columna
+     angosta perdida en medio de una pantalla ancha. */
+  .content{ max-width:1000px; }
+  .page-grid{ display:grid; grid-template-columns:1fr 360px; gap:28px; align-items:start; }
+  .page-side{ position:sticky; top:0; }
+}
+

@@ -586,40 +586,45 @@ function Ingresos({ productos, ventas, onRegistrar }) {
   };
 
   return (
-    <div>
-      <div className="info-banner pine"><Icon name="arrowDown" size={18} color="var(--pine)" /><span>Dinero que entra al negocio — cada venta suma a tu caja y descuenta del inventario</span></div>
-      <AsistenteVoz placeholder='Ej: "vendí 5 café volcán a 31.460 en efectivo"' onTexto={procesarVoz} />
-      <div className="form-card">
-        <Campo label="Producto">
-          <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
-            {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
-        </Campo>
-        <div className="field-row">
-          <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
-          <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
-        </div>
-        <Campo label="Forma de pago">
-          <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
-        </Campo>
-        <button type="button" className="submit-btn" style={{ marginTop: 6 }} onClick={guardar}>Guardar venta</button>
-      </div>
-      <p className="list-title">Reporte de ventas</p>
-      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
-      <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)", marginBottom: 16 }}>
-        <p className="stat-label">{reporte.filtrados.length} venta{reporte.filtrados.length === 1 ? "" : "s"}</p>
-        <p className="stat-value">{money(reporte.total)}</p>
-      </div>
-      {reporte.filtrados.length === 0 && <p className="list-empty">No hay ventas en este período.</p>}
-      {reporte.filtrados.slice(0, 20).map((v) => {
-        const prod = productos.find((p) => p.id === v.productoId);
-        return (
-          <div key={v.id} className="list-row">
-            <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{v.cantidad} u · {v.formaPago}</div></div>
-            <div className="li-amount" style={{ color: "var(--pine)" }}>+{money(v.cantidad * v.precio)}</div>
+    <div className="page-grid">
+      <div className="page-main">
+        <div className="info-banner pine"><Icon name="arrowDown" size={18} color="var(--pine)" /><span>Dinero que entra al negocio — cada venta suma a tu caja y descuenta del inventario</span></div>
+        <AsistenteVoz placeholder='Ej: "vendí 5 café volcán a 31.460 en efectivo"' onTexto={procesarVoz} />
+        <div className="form-card">
+          <Campo label="Producto">
+            <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+              {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </Campo>
+          <div className="field-row">
+            <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
+            <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
           </div>
-        );
-      })}
+          <Campo label="Forma de pago">
+            <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
+          </Campo>
+          <button type="button" className="submit-btn" style={{ marginTop: 6 }} onClick={guardar}>Guardar venta</button>
+        </div>
+      </div>
+
+      <div className="page-side">
+        <p className="list-title">Reporte de ventas</p>
+        <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)", marginBottom: 16 }}>
+          <p className="stat-label">{reporte.filtrados.length} venta{reporte.filtrados.length === 1 ? "" : "s"}</p>
+          <p className="stat-value">{money(reporte.total)}</p>
+        </div>
+        {reporte.filtrados.length === 0 && <p className="list-empty">No hay ventas en este período.</p>}
+        {reporte.filtrados.slice(0, 20).map((v) => {
+          const prod = productos.find((p) => p.id === v.productoId);
+          return (
+            <div key={v.id} className="list-row">
+              <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{v.cantidad} u · {v.formaPago}</div></div>
+              <div className="li-amount" style={{ color: "var(--pine)" }}>+{money(v.cantidad * v.precio)}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -678,63 +683,68 @@ function Compras({ productos, compras, onRegistrar, onAgregarProducto }) {
   };
 
   return (
-    <div>
-      <div className="info-banner cherry"><Icon name="cart" size={18} color="var(--cherry)" /><span>Dinero que sale del negocio — cada compra suma al inventario para poder vender</span></div>
-      <AsistenteVoz placeholder='Ej: "compré 100 café volcán a 11.460 en efectivo"' onTexto={procesarVoz} />
-      <div className="form-card cherry">
-        <Campo label="Producto">
-          <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
-            {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-          </select>
-        </Campo>
+    <div className="page-grid">
+      <div className="page-main">
+        <div className="info-banner cherry"><Icon name="cart" size={18} color="var(--cherry)" /><span>Dinero que sale del negocio — cada compra suma al inventario para poder vender</span></div>
+        <AsistenteVoz placeholder='Ej: "compré 100 café volcán a 11.460 en efectivo"' onTexto={procesarVoz} />
+        <div className="form-card cherry">
+          <Campo label="Producto">
+            <select className={llenado.producto ? "filled" : ""} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+              {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </Campo>
 
-        {!mostrarNuevo ? (
-          <button type="button" onClick={() => setMostrarNuevo(true)} style={{ background: "none", border: "none", padding: 0, marginBottom: 16, color: "var(--cherry)", fontWeight: 700, fontSize: "0.82rem", cursor: "pointer" }}>
-            + ¿Es un producto nuevo?
-          </button>
-        ) : (
-          <div style={{ background: "var(--cherry-bg)", borderRadius: 12, padding: 14, marginBottom: 16 }}>
-            <p style={{ margin: "0 0 10px", fontSize: "0.8rem", fontWeight: 700, color: "var(--cherry)" }}>Registrar producto nuevo</p>
-            <Campo label="Nombre del producto"><input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
-            <Campo label="Precio de venta"><input value={nuevoPrecioVenta} onChange={(e) => setNuevoPrecioVenta(e.target.value)} inputMode="numeric" placeholder="$ 0" /></Campo>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" className="submit-btn cherry" style={{ flex: 1 }} onClick={crearProductoNuevo} disabled={creandoProducto || !nuevoNombre.trim()}>
-                {creandoProducto ? "Creando…" : "Crear y seleccionar"}
-              </button>
-              <button type="button" className="submit-btn ghost" style={{ flex: 1 }} onClick={() => { setMostrarNuevo(false); setNuevoNombre(""); setNuevoPrecioVenta(""); }}>
-                Cancelar
-              </button>
+          {!mostrarNuevo ? (
+            <button type="button" onClick={() => setMostrarNuevo(true)} style={{ background: "none", border: "none", padding: 0, marginBottom: 16, color: "var(--cherry)", fontWeight: 700, fontSize: "0.82rem", cursor: "pointer" }}>
+              + ¿Es un producto nuevo?
+            </button>
+          ) : (
+            <div style={{ background: "var(--cherry-bg)", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+              <p style={{ margin: "0 0 10px", fontSize: "0.8rem", fontWeight: 700, color: "var(--cherry)" }}>Registrar producto nuevo</p>
+              <Campo label="Nombre del producto"><input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Ej: Café Especial 500gr" /></Campo>
+              <Campo label="Precio de venta"><input value={nuevoPrecioVenta} onChange={(e) => setNuevoPrecioVenta(e.target.value)} inputMode="numeric" placeholder="$ 0" /></Campo>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="submit-btn cherry" style={{ flex: 1 }} onClick={crearProductoNuevo} disabled={creandoProducto || !nuevoNombre.trim()}>
+                  {creandoProducto ? "Creando…" : "Crear y seleccionar"}
+                </button>
+                <button type="button" className="submit-btn ghost" style={{ flex: 1 }} onClick={() => { setMostrarNuevo(false); setNuevoNombre(""); setNuevoPrecioVenta(""); }}>
+                  Cancelar
+                </button>
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: "0.72rem", color: "var(--espresso-600)" }}>El costo y el stock inicial quedan en 0 — se completan automáticamente con esta misma compra.</p>
             </div>
-            <p style={{ margin: "10px 0 0", fontSize: "0.72rem", color: "var(--espresso-600)" }}>El costo y el stock inicial quedan en 0 — se completan automáticamente con esta misma compra.</p>
-          </div>
-        )}
+          )}
 
-        <div className="field-row">
-          <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
-          <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
-        </div>
-        <Campo label="Forma de pago">
-          <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
-        </Campo>
-        <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
-        <button type="button" className="submit-btn cherry" style={{ marginTop: 6 }} onClick={guardar}>Guardar compra</button>
-      </div>
-      <p className="list-title">Reporte de compras</p>
-      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
-      <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)", marginBottom: 16 }}>
-        <p className="stat-label">{reporte.filtrados.length} compra{reporte.filtrados.length === 1 ? "" : "s"}</p>
-        <p className="stat-value">{money(reporte.total)}</p>
-      </div>
-      {reporte.filtrados.length === 0 && <p className="list-empty">No hay compras en este período.</p>}
-      {reporte.filtrados.slice(0, 20).map((c) => {
-        const prod = productos.find((p) => p.id === c.productoId);
-        return (
-          <div key={c.id} className="list-row">
-            <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{c.cantidad} u · {c.formaPago}{c.saldo > 0 ? " · pendiente" : ""}</div></div>
-            <div className="li-amount" style={{ color: "var(--cherry)" }}>-{money(c.cantidad * c.precio)}</div>
+          <div className="field-row">
+            <Campo label="Cantidad"><input className={llenado.cantidad ? "filled" : ""} value={cantidad} onChange={(e) => setCantidad(e.target.value)} inputMode="numeric" /></Campo>
+            <Campo label="Precio unitario"><input className={llenado.precio ? "filled" : ""} value={precio} onChange={(e) => setPrecio(e.target.value)} inputMode="numeric" /></Campo>
           </div>
-        );
-      })}
+          <Campo label="Forma de pago">
+            <select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select>
+          </Campo>
+          <Campo label="Fecha de vencimiento (opcional)"><input type="date" value={vencimiento} onChange={(e) => setVencimiento(e.target.value)} /></Campo>
+          <button type="button" className="submit-btn cherry" style={{ marginTop: 6 }} onClick={guardar}>Guardar compra</button>
+        </div>
+      </div>
+
+      <div className="page-side">
+        <p className="list-title">Reporte de compras</p>
+        <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)", marginBottom: 16 }}>
+          <p className="stat-label">{reporte.filtrados.length} compra{reporte.filtrados.length === 1 ? "" : "s"}</p>
+          <p className="stat-value">{money(reporte.total)}</p>
+        </div>
+        {reporte.filtrados.length === 0 && <p className="list-empty">No hay compras en este período.</p>}
+        {reporte.filtrados.slice(0, 20).map((c) => {
+          const prod = productos.find((p) => p.id === c.productoId);
+          return (
+            <div key={c.id} className="list-row">
+              <div><div className="li-main">{prod?.nombre}</div><div className="li-sub">{c.cantidad} u · {c.formaPago}{c.saldo > 0 ? " · pendiente" : ""}</div></div>
+              <div className="li-amount" style={{ color: "var(--cherry)" }}>-{money(c.cantidad * c.precio)}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -767,34 +777,39 @@ function Gastos({ gastos, onRegistrar, onPagar, onEliminar }) {
   const guardar = () => { onRegistrar({ descripcion, valor: Number(valor), formaPago }); setDescripcion(""); setValor(""); setLlenado({}); };
 
   return (
-    <div>
-      <div className="info-banner caramel"><Icon name="receipt" size={18} color="var(--caramel-text)" /><span>Costos fijos y operativos del negocio (arriendo, servicios, nómina…)</span></div>
-      <AsistenteVoz placeholder='Ej: "pagué 100 mil de agua por Nequi"' onTexto={procesarVoz} />
-      <div className="form-card caramel">
-        <Campo label="Descripción"><input className={llenado.descripcion ? "filled" : ""} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Arriendo, agua, luz…" /></Campo>
-        <div className="field-row">
-          <Campo label="Valor"><input className={llenado.valor ? "filled" : ""} value={valor} onChange={(e) => setValor(e.target.value)} inputMode="numeric" /></Campo>
-          <Campo label="Forma de pago"><select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select></Campo>
-        </div>
-        <button type="button" className="submit-btn caramel" style={{ marginTop: 6 }} onClick={guardar}>Guardar gasto</button>
-      </div>
-      <p className="list-title">Reporte de gastos</p>
-      <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
-      <div className="stat-card" style={{ borderLeft: "3px solid var(--caramel)", marginBottom: 16 }}>
-        <p className="stat-label">{reporte.filtrados.length} gasto{reporte.filtrados.length === 1 ? "" : "s"}</p>
-        <p className="stat-value">{money(reporte.total)}</p>
-      </div>
-      {reporte.filtrados.length === 0 && <p className="list-empty">No hay gastos en este período.</p>}
-      {reporte.filtrados.slice(0, 20).map((g) => (
-        <div key={g.id} className="list-row">
-          <div><div className="li-main">{g.descripcion}</div><div className="li-sub">{g.formaPago}{!g.pagado ? " · pendiente" : ""}</div></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="li-amount" style={{ color: "var(--caramel-text)" }}>{money(g.valor)}</span>
-            {!g.pagado && <button type="button" onClick={() => onPagar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem" }}>Pagar</button>}
-            {onEliminar && <button type="button" onClick={() => onEliminar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem", color: "var(--cherry)" }}>Eliminar</button>}
+    <div className="page-grid">
+      <div className="page-main">
+        <div className="info-banner caramel"><Icon name="receipt" size={18} color="var(--caramel-text)" /><span>Costos fijos y operativos del negocio (arriendo, servicios, nómina…)</span></div>
+        <AsistenteVoz placeholder='Ej: "pagué 100 mil de agua por Nequi"' onTexto={procesarVoz} />
+        <div className="form-card caramel">
+          <Campo label="Descripción"><input className={llenado.descripcion ? "filled" : ""} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Arriendo, agua, luz…" /></Campo>
+          <div className="field-row">
+            <Campo label="Valor"><input className={llenado.valor ? "filled" : ""} value={valor} onChange={(e) => setValor(e.target.value)} inputMode="numeric" /></Campo>
+            <Campo label="Forma de pago"><select className={llenado.pago ? "filled" : ""} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>{FORMAS_PAGO.map((f) => <option key={f}>{f}</option>)}</select></Campo>
           </div>
+          <button type="button" className="submit-btn caramel" style={{ marginTop: 6 }} onClick={guardar}>Guardar gasto</button>
         </div>
-      ))}
+      </div>
+
+      <div className="page-side">
+        <p className="list-title">Reporte de gastos</p>
+        <TabsPeriodo periodo={reporte.periodo} setPeriodo={reporte.setPeriodo} />
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--caramel)", marginBottom: 16 }}>
+          <p className="stat-label">{reporte.filtrados.length} gasto{reporte.filtrados.length === 1 ? "" : "s"}</p>
+          <p className="stat-value">{money(reporte.total)}</p>
+        </div>
+        {reporte.filtrados.length === 0 && <p className="list-empty">No hay gastos en este período.</p>}
+        {reporte.filtrados.slice(0, 20).map((g) => (
+          <div key={g.id} className="list-row">
+            <div><div className="li-main">{g.descripcion}</div><div className="li-sub">{g.formaPago}{!g.pagado ? " · pendiente" : ""}</div></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="li-amount" style={{ color: "var(--caramel-text)" }}>{money(g.valor)}</span>
+              {!g.pagado && <button type="button" onClick={() => onPagar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem" }}>Pagar</button>}
+              {onEliminar && <button type="button" onClick={() => onEliminar(g.id)} className="submit-btn ghost" style={{ width: "auto", padding: "6px 10px", fontSize: "0.74rem", color: "var(--cherry)" }}>Eliminar</button>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -829,32 +844,35 @@ function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
   };
 
   return (
-    <div>
-      <div className="info-banner dusk"><Icon name="package" size={18} color="var(--dusk)" /><span>Consulta y ajusta las existencias de cada producto</span></div>
-      <AsistenteVoz placeholder='Ej: "¿cuánto stock de café volcán me queda?"' onTexto={procesarVoz} />
+    <div className="page-grid">
+      <div className="page-main">
+        <div className="info-banner dusk"><Icon name="package" size={18} color="var(--dusk)" /><span>Consulta y ajusta las existencias de cada producto</span></div>
+        <AsistenteVoz placeholder='Ej: "¿cuánto stock de café volcán me queda?"' onTexto={procesarVoz} />
 
-      {stockBajo.length > 0 && <div className="info-banner cherry" style={{ marginBottom: 10 }}><Icon name="alertTriangle" size={16} color="var(--cherry)" /><span>{stockBajo.length} producto(s) con stock por debajo de {STOCK_MINIMO} unidades</span></div>}
-      {porVencer.length > 0 && <div className="info-banner caramel" style={{ marginBottom: 14 }}><Icon name="alertTriangle" size={16} color="var(--caramel-text)" /><span>{porVencer.length} producto(s) vencidos o próximos a vencer</span></div>}
+        {stockBajo.length > 0 && <div className="info-banner cherry" style={{ marginBottom: 10 }}><Icon name="alertTriangle" size={16} color="var(--cherry)" /><span>{stockBajo.length} producto(s) con stock por debajo de {STOCK_MINIMO} unidades</span></div>}
+        {porVencer.length > 0 && <div className="info-banner caramel" style={{ marginBottom: 14 }}><Icon name="alertTriangle" size={16} color="var(--caramel-text)" /><span>{porVencer.length} producto(s) vencidos o próximos a vencer</span></div>}
 
-      <p className="list-title">Productos</p>
-      {productos.map((p) => {
-        const bajo = p.stock < STOCK_MINIMO;
-        const dias = diasParaVencer(p.fechaVencimiento);
-        const vence = dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
-        return (
-          <div key={p.id} className="stock-row">
-            <div>
-              <div className="si-name">{p.nombre}</div>
-              <div className={`si-qty ${bajo ? "low" : ""}`}>{p.stock} unidades{bajo ? " · stock bajo" : ""}</div>
-              <div className="si-vence">Costo: {money(p.costoProm)} · Venta: {money(p.precioVenta)}</div>
-              {p.fechaVencimiento && <div className={`si-vence ${vence ? "pronto" : ""}`}>{dias < 0 ? `Venció hace ${Math.abs(dias)} días` : dias === 0 ? "Vence hoy" : `Vence en ${dias} días`}</div>}
+        <p className="list-title">Productos</p>
+        {productos.map((p) => {
+          const bajo = p.stock < STOCK_MINIMO;
+          const dias = diasParaVencer(p.fechaVencimiento);
+          const vence = dias !== null && dias <= DIAS_ALERTA_VENCIMIENTO;
+          return (
+            <div key={p.id} className="stock-row">
+              <div>
+                <div className="si-name">{p.nombre}</div>
+                <div className={`si-qty ${bajo ? "low" : ""}`}>{p.stock} unidades{bajo ? " · stock bajo" : ""}</div>
+                <div className="si-vence">Costo: {money(p.costoProm)} · Venta: {money(p.precioVenta)}</div>
+                {p.fechaVencimiento && <div className={`si-vence ${vence ? "pronto" : ""}`}>{dias < 0 ? `Venció hace ${Math.abs(dias)} días` : dias === 0 ? "Vence hoy" : `Vence en ${dias} días`}</div>}
+              </div>
+              <div className="si-qty-num">{p.stock} u</div>
             </div>
-            <div className="si-qty-num">{p.stock} u</div>
-          </div>
-        );
-      })}
+          );
+        })}
+        <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--espresso-600)" }}>El inventario se actualiza automáticamente con cada compra (entrada) y cada venta (salida). El costo promedio se recalcula por compra.</p>
+      </div>
 
-      <div style={{ marginTop: 18 }}>
+      <div className="page-side">
         {!mostrarForm ? (
           <button type="button" className="submit-btn ghost" onClick={() => setMostrarForm(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
             <Icon name="package" size={16} /> Registrar inventario manual
@@ -895,7 +913,6 @@ function Inventario({ productos, onAgregarProducto, onAjustarStock }) {
           </div>
         )}
       </div>
-      <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--espresso-600)" }}>El inventario se actualiza automáticamente con cada compra (entrada) y cada venta (salida). El costo promedio se recalcula por compra.</p>
     </div>
   );
 }
@@ -1013,44 +1030,49 @@ function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta,
   if (vista === "flujo") return <FlujoCaja ventas={ventas} compras={compras} gastos={gastos} volver={() => setVista("resumen")} />;
 
   return (
-    <div>
-      <div className="info-banner plum"><Icon name="bars" size={18} color="var(--plum)" /><span>Resumen de tu negocio — ventas, gastos y ganancia</span></div>
-      <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={async () => `Tu utilidad acumulada es ${money(utilidad)}.`} />
+    <div className="page-grid">
+      <div className="page-main">
+        <div className="info-banner plum"><Icon name="bars" size={18} color="var(--plum)" /><span>Resumen de tu negocio — ventas, gastos y ganancia</span></div>
+        <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={async () => `Tu utilidad acumulada es ${money(utilidad)}.`} />
 
-      <div className="stats3">
-        <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentas)}</p></div>
-        <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)" }}><p className="stat-label">Gastos</p><p className="stat-value">{money(totalGastos)}</p></div>
-        <div className="stat-card" style={{ borderLeft: `3px solid ${utilidad >= 0 ? "var(--pine)" : "var(--cherry)"}` }}><p className="stat-label">Ganancia</p><p className="stat-value">{money(utilidad)}</p></div>
+        <div className="stats3">
+          <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentas)}</p></div>
+          <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)" }}><p className="stat-label">Gastos</p><p className="stat-value">{money(totalGastos)}</p></div>
+          <div className="stat-card" style={{ borderLeft: `3px solid ${utilidad >= 0 ? "var(--pine)" : "var(--cherry)"}` }}><p className="stat-label">Ganancia</p><p className="stat-value">{money(utilidad)}</p></div>
+        </div>
+
+        <p className="list-title">Últimos 7 días</p>
+        <GraficoSemana series={[{ label: "Ventas", color: "var(--pine)", datos: semana.ventas }, { label: "Compras", color: "var(--cherry)", datos: semana.compras }, { label: "Gastos", color: "var(--caramel)", datos: semana.gastos }]} />
+        <div style={{ display: "flex", gap: 14, margin: "10px 0 20px", fontSize: "0.7rem", color: "var(--espresso-600)" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--pine)", display: "inline-block" }} />Ventas</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--cherry)", display: "inline-block" }} />Compras</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--caramel)", display: "inline-block" }} />Gastos</span>
+        </div>
+
+        <div className="form-card">
+          <p style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 8, color: "var(--espresso-900)" }}>Estado de resultado</p>
+          <Linea label="Total ventas" valor={totalVentas} />
+          <Linea label="Costo de venta" valor={-reportes.totalCosto} />
+          <Linea label="Gastos" valor={-totalGastos} />
+          <div style={{ borderTop: "1px solid var(--cream-dim)", marginTop: 6, paddingTop: 6 }}><Linea label="Utilidad" valor={utilidad} fuerte /></div>
+        </div>
       </div>
 
-      <p className="list-title">Últimos 7 días</p>
-      <GraficoSemana series={[{ label: "Ventas", color: "var(--pine)", datos: semana.ventas }, { label: "Compras", color: "var(--cherry)", datos: semana.compras }, { label: "Gastos", color: "var(--caramel)", datos: semana.gastos }]} />
-      <div style={{ display: "flex", gap: 14, margin: "10px 0 20px", fontSize: "0.7rem", color: "var(--espresso-600)" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--pine)", display: "inline-block" }} />Ventas</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--cherry)", display: "inline-block" }} />Compras</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--caramel)", display: "inline-block" }} />Gastos</span>
+      <div className="page-side">
+        <p className="list-title">Más informes</p>
+        <button type="button" className="report-link" onClick={() => setVista("flujo")}>
+          <span className="rl-left"><Icon name="bars" size={16} color="var(--dusk)" /> Flujo de Caja</span>
+          <span className="rl-right"><Icon name="chevronRight" size={14} /></span>
+        </button>
+        <button type="button" className="report-link" onClick={() => setVista("cobrar")}>
+          <span className="rl-left"><Icon name="users" size={16} color="var(--dusk)" /> Cuentas por cobrar</span>
+          <span className="rl-right">{cuentasPorCobrar.length} <Icon name="chevronRight" size={14} /></span>
+        </button>
+        <button type="button" className="report-link" onClick={() => setVista("pagar")}>
+          <span className="rl-left"><Icon name="truck" size={16} color="var(--dusk)" /> Cuentas por pagar</span>
+          <span className="rl-right">{cuentasPorPagar.length} <Icon name="chevronRight" size={14} /></span>
+        </button>
       </div>
-
-      <div className="form-card">
-        <p style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 8, color: "var(--espresso-900)" }}>Estado de resultado</p>
-        <Linea label="Total ventas" valor={totalVentas} />
-        <Linea label="Costo de venta" valor={-reportes.totalCosto} />
-        <Linea label="Gastos" valor={-totalGastos} />
-        <div style={{ borderTop: "1px solid var(--cream-dim)", marginTop: 6, paddingTop: 6 }}><Linea label="Utilidad" valor={utilidad} fuerte /></div>
-      </div>
-
-      <button type="button" className="report-link" onClick={() => setVista("flujo")}>
-        <span className="rl-left"><Icon name="bars" size={16} color="var(--dusk)" /> Flujo de Caja</span>
-        <span className="rl-right"><Icon name="chevronRight" size={14} /></span>
-      </button>
-      <button type="button" className="report-link" onClick={() => setVista("cobrar")}>
-        <span className="rl-left"><Icon name="users" size={16} color="var(--dusk)" /> Cuentas por cobrar</span>
-        <span className="rl-right">{cuentasPorCobrar.length} <Icon name="chevronRight" size={14} /></span>
-      </button>
-      <button type="button" className="report-link" onClick={() => setVista("pagar")}>
-        <span className="rl-left"><Icon name="truck" size={16} color="var(--dusk)" /> Cuentas por pagar</span>
-        <span className="rl-right">{cuentasPorPagar.length} <Icon name="chevronRight" size={14} /></span>
-      </button>
     </div>
   );
 }
