@@ -298,6 +298,15 @@ function App() {
   const [cargandoSesion, setCargandoSesion] = useState(true);
   const [perfil, setPerfil] = useState(null);
 
+  const [tema, setTema] = useState(() => {
+    try { return localStorage.getItem("cafe_tema") || "light"; } catch { return "light"; }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", tema);
+    try { localStorage.setItem("cafe_tema", tema); } catch { /* ignora si el navegador bloquea el storage */ }
+  }, [tema]);
+  const alternarTema = () => setTema((t) => (t === "dark" ? "light" : "dark"));
+
   const [pantalla, setPantalla] = useState("inicio");
   const [productos, setProductos] = useState([]);
   const [ventas, setVentas] = useState([]);
@@ -445,7 +454,7 @@ function App() {
 
   return (
     <div className="phone">
-      <Header pantalla={pantalla} onLogout={cerrarSesion} />
+      <Header pantalla={pantalla} onLogout={cerrarSesion} tema={tema} onToggleTema={alternarTema} />
       <main className="content">
         {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
@@ -466,7 +475,7 @@ function App() {
 
 const TITULOS = { inicio: "Panel principal", ingresos: "Ingresos", compras: "Compras", gastos: "Gastos", inventario: "Inventario", reportes: "Reportes" };
 
-function Header({ pantalla, onLogout }) {
+function Header({ pantalla, onLogout, tema, onToggleTema }) {
   return (
     <div className="header">
       <img className="badge" src={logoUrl} alt="Café Tierra Querida" />
@@ -474,6 +483,9 @@ function Header({ pantalla, onLogout }) {
         <p className="brand font-titulo">Café Tierra Querida</p>
         <p className="sub">{TITULOS[pantalla]}</p>
       </div>
+      <button className="logout-btn" onClick={onToggleTema} aria-label={tema === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"} title={tema === "dark" ? "Modo claro" : "Modo oscuro"}>
+        <Icon name={tema === "dark" ? "sun" : "moon"} size={18} color="var(--espresso-700)" />
+      </button>
       <button className="logout-btn" onClick={onLogout} aria-label="Cerrar sesión">
         <Icon name="logout" size={18} color="var(--espresso-700)" />
       </button>

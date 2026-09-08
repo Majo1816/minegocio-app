@@ -19,6 +19,8 @@ const ICONS = {
   plus: { paths: ["M12 5v14", "M5 12h14"] },
   minus: { paths: ["M5 12h14"] },
   calendar: { paths: ["M3 4h18v18H3z", "M16 2L16 6", "M8 2L8 6", "M3 10L21 10"] },
+  sun: { paths: ["M12 1L12 3", "M12 21L12 23", "M4.22 4.22L5.64 5.64", "M18.36 18.36L19.78 19.78", "M1 12L3 12", "M21 12L23 12", "M4.22 19.78L5.64 18.36", "M18.36 5.64L19.78 4.22"], circles: [{ cx: 12, cy: 12, r: 5 }] },
+  moon: { paths: ["M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"] },
 };
 
 export default function Icon({ name, size = 18, color = "currentColor", className = "" }) {
