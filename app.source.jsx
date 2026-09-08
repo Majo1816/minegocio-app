@@ -79,6 +79,57 @@ function saludoPorHora() {
   return "Buenas noches — cerrando con buen aroma";
 }
 
+// ---------- Contador animado (números que suben al aparecer) ----------
+function useContador(valor, duracion = 900) {
+  const [mostrado, setMostrado] = useState(valor);
+  const anteriorRef = useRef(valor);
+  useEffect(() => {
+    const inicio = anteriorRef.current;
+    const diferencia = valor - inicio;
+    if (!diferencia) { setMostrado(valor); return; }
+    const t0 = performance.now();
+    let frameId;
+    const paso = (ahora) => {
+      const progreso = Math.min((ahora - t0) / duracion, 1);
+      setMostrado(inicio + diferencia * progreso);
+      if (progreso < 1) frameId = requestAnimationFrame(paso);
+      else anteriorRef.current = valor;
+    };
+    frameId = requestAnimationFrame(paso);
+    return () => cancelAnimationFrame(frameId);
+  }, [valor, duracion]);
+  return mostrado;
+}
+
+// ---------- Racha de días seguidos con al menos una venta ----------
+function calcularRacha(ventas) {
+  const dias = new Set(ventas.filter((v) => v.fecha).map((v) => v.fecha.slice(0, 10)));
+  let racha = 0;
+  const cursor = new Date();
+  while (dias.has(cursor.toISOString().slice(0, 10))) {
+    racha++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return racha;
+}
+
+// ---------- Taza de café como indicador de progreso hacia una meta ----------
+function TazaProgreso({ porcentaje, size = 78 }) {
+  const pct = Math.max(0, Math.min(100, porcentaje));
+  const alturaTotal = 60;
+  const y = 34 + alturaTotal * (1 - pct / 100);
+  return (
+    <svg viewBox="0 0 104 104" width={size} height={size}>
+      <defs><clipPath id="tazaProgresoClip"><path d="M26 34 H70 L65 82 Q64 92 52 92 H44 Q32 92 31 82 Z" /></clipPath></defs>
+      <g clipPath="url(#tazaProgresoClip)">
+        <rect x="24" y={y} width="52" height={alturaTotal} fill="var(--caramel)" style={{ transition: "y 0.8s ease" }} />
+      </g>
+      <path d="M26 34 H70 L65 82 Q64 92 52 92 H44 Q32 92 31 82 Z" fill="none" stroke="var(--espresso-700)" strokeWidth="3.5" />
+      <path d="M70 40 Q88 40 88 55 Q88 70 70 68" fill="none" stroke="var(--espresso-700)" strokeWidth="3.5" />
+    </svg>
+  );
+}
+
 // ---------- Reporte por período, reutilizable dentro de cada módulo ----------
 function usePeriodoReporte(items, montoFn) {
   const [periodo, setPeriodo] = useState("dia");
@@ -312,6 +363,7 @@ function App() {
   const [ventas, setVentas] = useState([]);
   const [compras, setCompras] = useState([]);
   const [gastos, setGastos] = useState([]);
+  const [metaMensual, setMetaMensual] = useState(0);
   const [toast, setToast] = useState(null);
 
   const mostrarToast = (msg, tipo = "ok") => { setToast({ msg, tipo }); setTimeout(() => setToast(null), 2600); };
@@ -323,16 +375,19 @@ function App() {
   }, []);
 
   const cargarTodo = useCallback(async () => {
-    const [{ data: prod }, { data: vt }, { data: cp }, { data: gs }] = await Promise.all([
+    const [{ data: prod }, { data: vt }, { data: cp }, { data: gs }, { data: cfg }] = await Promise.all([
       supabase.from("productos").select("*").order("id"),
       supabase.from("ventas").select("*").order("creado_en", { ascending: false }),
       supabase.from("compras").select("*").order("creado_en", { ascending: false }),
       supabase.from("gastos").select("*").order("creado_en", { ascending: false }),
+      supabase.from("configuracion").select("*"),
     ]);
     setProductos((prod || []).map((p) => ({ id: Number(p.id), nombre: p.nombre, stock: p.stock, costoProm: Number(p.costo_prom), precioVenta: Number(p.precio_venta), fechaVencimiento: p.fecha_vencimiento })));
     setVentas((vt || []).map((v) => ({ id: Number(v.id), productoId: Number(v.producto_id), cantidad: v.cantidad, precio: Number(v.precio), formaPago: v.forma_pago, costoUnit: Number(v.costo_unit), saldo: Number(v.saldo), fecha: v.creado_en })));
     setCompras((cp || []).map((c) => ({ id: Number(c.id), productoId: Number(c.producto_id), cantidad: c.cantidad, precio: Number(c.precio), formaPago: c.forma_pago, saldo: Number(c.saldo), fecha: c.creado_en })));
     setGastos((gs || []).map((g) => ({ id: Number(g.id), descripcion: g.descripcion, valor: Number(g.valor), formaPago: g.forma_pago, pagado: g.pagado, fecha: g.creado_en })));
+    const metaRow = (cfg || []).find((c) => c.clave === "meta_mensual");
+    setMetaMensual(metaRow ? Number(metaRow.valor) : 0);
   }, []);
 
   useEffect(() => {
@@ -427,6 +482,12 @@ function App() {
   };
   const eliminarGasto = async (id) => { await supabase.from("gastos").delete().eq("id", id); await cargarTodo(); };
   const cerrarSesion = async () => { await supabase.auth.signOut(); };
+  const actualizarMeta = async (valor) => {
+    const { error } = await supabase.from("configuracion").upsert({ clave: "meta_mensual", valor: Number(valor) || 0 });
+    if (error) return mostrarToast("No se pudo actualizar la meta", "error");
+    await cargarTodo();
+    mostrarToast("Meta actualizada");
+  };
 
   const agregarProducto = async ({ nombre, stock, costoProm, precioVenta, fechaVencimiento }) => {
     if (!nombre) { mostrarToast("Escribe un nombre de producto", "error"); return null; }
@@ -456,12 +517,12 @@ function App() {
     <div className="phone">
       <Header pantalla={pantalla} onLogout={cerrarSesion} tema={tema} onToggleTema={alternarTema} />
       <main className="content">
-        {pantalla === "inicio" && <Inicio productos={productos} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
+        {pantalla === "inicio" && <Inicio productos={productos} ventas={ventas} stockBajo={stockBajo} ir={setPantalla} perfil={perfil} />}
         {pantalla === "ingresos" && <Ingresos productos={productos} ventas={ventas} onRegistrar={registrarVenta} />}
         {pantalla === "compras" && <Compras productos={productos} compras={compras} onRegistrar={registrarCompra} onAgregarProducto={agregarProducto} />}
         {pantalla === "gastos" && <Gastos gastos={gastos} onRegistrar={registrarGasto} onPagar={pagarGasto} onEliminar={eliminarGasto} />}
         {pantalla === "inventario" && <Inventario productos={productos} onAgregarProducto={agregarProducto} onAjustarStock={ajustarStock} />}
-        {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} ventas={ventas} compras={compras} gastos={gastos} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
+        {pantalla === "reportes" && <Reportes reportes={reportes} productos={productos} ventas={ventas} compras={compras} gastos={gastos} metaMensual={metaMensual} onActualizarMeta={actualizarMeta} onAbonarVenta={abonarVenta} onPagarCompra={pagarCompra} />}
       </main>
       <NavInferior pantalla={pantalla} ir={setPantalla} alertas={stockBajo.length} />
       {toast && (
@@ -539,8 +600,10 @@ function detectarNavegacion(texto) {
   return DESTINOS_NAVEGACION.find((d) => d.claves.some((c) => contienePalabra(t, c))) || null;
 }
 
-function Inicio({ productos, stockBajo, ir, perfil }) {
+function Inicio({ productos, ventas, stockBajo, ir, perfil }) {
   const totalStock = productos.reduce((s, p) => s + p.stock, 0);
+  const totalStockAnimado = useContador(totalStock);
+  const racha = useMemo(() => calcularRacha(ventas), [ventas]);
   const tiles = [
     { id: "ingresos", label: "Ingresos", icon: "arrowDown", clase: "ingresos" },
     { id: "compras", label: "Compras", icon: "cart", clase: "compras" },
@@ -568,10 +631,17 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
       <p style={{ fontSize: "0.86rem", color: "var(--espresso-600)", margin: "0 0 4px" }}>
         Hola, <strong style={{ color: "var(--espresso-900)" }}>{perfil?.nombre || "bienvenido"}</strong>
       </p>
-      <h1 className="font-titulo" style={{ fontWeight: 600, fontStyle: "italic", fontSize: "1.35rem", margin: "0 0 18px", color: "var(--espresso-900)", lineHeight: 1.25 }}>{saludoPorHora()}</h1>
+      <h1 className="font-titulo" style={{ fontWeight: 600, fontStyle: "italic", fontSize: "1.35rem", margin: "0 0 12px", color: "var(--espresso-900)", lineHeight: 1.25 }}>{saludoPorHora()}</h1>
+
+      {racha > 0 && (
+        <div className="info-banner caramel" style={{ marginBottom: 16 }}>
+          <span>🔥</span>
+          <span>{racha} día{racha === 1 ? "" : "s"} seguido{racha === 1 ? "" : "s"} registrando ventas — ¡sigue así!</span>
+        </div>
+      )}
 
       <div className="stats">
-        <div className="stat-card"><p className="stat-label">Unidades en stock</p><p className="stat-value">{totalStock}</p></div>
+        <div className="stat-card"><p className="stat-label">Unidades en stock</p><p className="stat-value">{Math.round(totalStockAnimado)}</p></div>
         <div className="stat-card"><p className="stat-label">Alertas de stock</p><p className="stat-value" style={{ color: stockBajo.length ? "var(--cherry)" : "var(--espresso-900)" }}>{stockBajo.length}</p></div>
       </div>
 
@@ -1063,9 +1133,29 @@ function ListaCuentas({ titulo, items, productos, tipo, onAccion, volver }) {
   );
 }
 
-function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta, onPagarCompra }) {
+function Reportes({ reportes, productos, ventas, compras, gastos, metaMensual, onActualizarMeta, onAbonarVenta, onPagarCompra }) {
   const [vista, setVista] = useState("resumen");
   const { totalVentas, totalGastos, utilidad, cuentasPorCobrar, cuentasPorPagar, semana } = reportes;
+
+  const totalVentasAnim = useContador(totalVentas);
+  const totalGastosAnim = useContador(totalGastos);
+  const utilidadAnim = useContador(utilidad);
+
+  const ventasDelMes = useMemo(() => ventas.filter((v) => dentroDePeriodo(v.fecha, "mes")).reduce((s, v) => s + v.cantidad * v.precio, 0), [ventas]);
+  const progresoMeta = metaMensual > 0 ? Math.min(100, (ventasDelMes / metaMensual) * 100) : 0;
+  const [editandoMeta, setEditandoMeta] = useState(false);
+  const [inputMeta, setInputMeta] = useState(metaMensual || "");
+
+  const productoEstrella = useMemo(() => {
+    const totales = {};
+    for (const v of ventas) totales[v.productoId] = (totales[v.productoId] || 0) + v.cantidad * v.precio;
+    let mejorId = null, mejorTotal = 0;
+    for (const [id, total] of Object.entries(totales)) { if (total > mejorTotal) { mejorTotal = total; mejorId = Number(id); } }
+    const prod = productos.find((p) => p.id === mejorId);
+    return prod ? { prod, total: mejorTotal } : null;
+  }, [ventas, productos]);
+
+  const guardarMeta = () => { onActualizarMeta(inputMeta); setEditandoMeta(false); };
 
   const procesarConsulta = async (texto) => {
     const t = normalizar(texto);
@@ -1089,10 +1179,41 @@ function Reportes({ reportes, productos, ventas, compras, gastos, onAbonarVenta,
         <div className="info-banner plum"><Icon name="bars" size={18} color="var(--plum)" /><span>Resumen de tu negocio — ventas, gastos y ganancia</span></div>
         <AsistenteVoz placeholder='Ej: "¿cuál fue mi ganancia esta semana?"' onTexto={procesarConsulta} />
 
+        <div className="form-card" style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <TazaProgreso porcentaje={progresoMeta} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: "0 0 4px", fontSize: "0.82rem", fontWeight: 700, color: "var(--espresso-900)" }}>Meta del mes</p>
+            {metaMensual > 0 ? (
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--espresso-600)" }}>
+                {money(ventasDelMes)} de {money(metaMensual)} <strong style={{ color: "var(--caramel-text)" }}>({Math.round(progresoMeta)}%)</strong>
+              </p>
+            ) : (
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--espresso-600)" }}>Aún no has definido una meta de ventas.</p>
+            )}
+            {!editandoMeta ? (
+              <button type="button" onClick={() => { setInputMeta(metaMensual || ""); setEditandoMeta(true); }} style={{ marginTop: 6, background: "none", border: "none", padding: 0, color: "var(--caramel-text)", fontWeight: 700, fontSize: "0.78rem", cursor: "pointer" }}>
+                {metaMensual > 0 ? "Editar meta" : "Definir meta"}
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input value={inputMeta} onChange={(e) => setInputMeta(e.target.value)} inputMode="numeric" placeholder="Ej: 3000000" style={{ flex: 1, minWidth: 0 }} />
+                <button type="button" className="submit-btn" style={{ width: "auto", padding: "8px 12px", fontSize: "0.8rem" }} onClick={guardarMeta}>Guardar</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {productoEstrella && (
+          <div className="info-banner caramel" style={{ alignItems: "center" }}>
+            <span style={{ fontSize: "1.1rem" }}>⭐</span>
+            <span><strong>Producto estrella:</strong> {productoEstrella.prod.nombre} — {money(productoEstrella.total)} vendidos en total</span>
+          </div>
+        )}
+
         <div className="stats3">
-          <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentas)}</p></div>
-          <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)" }}><p className="stat-label">Gastos</p><p className="stat-value">{money(totalGastos)}</p></div>
-          <div className="stat-card" style={{ borderLeft: `3px solid ${utilidad >= 0 ? "var(--pine)" : "var(--cherry)"}` }}><p className="stat-label">Ganancia</p><p className="stat-value">{money(utilidad)}</p></div>
+          <div className="stat-card" style={{ borderLeft: "3px solid var(--pine)" }}><p className="stat-label">Ventas</p><p className="stat-value">{money(totalVentasAnim)}</p></div>
+          <div className="stat-card" style={{ borderLeft: "3px solid var(--cherry)" }}><p className="stat-label">Gastos</p><p className="stat-value">{money(totalGastosAnim)}</p></div>
+          <div className="stat-card" style={{ borderLeft: `3px solid ${utilidad >= 0 ? "var(--pine)" : "var(--cherry)"}` }}><p className="stat-label">Ganancia</p><p className="stat-value">{money(utilidadAnim)}</p></div>
         </div>
 
         <p className="list-title">Últimos 7 días</p>
