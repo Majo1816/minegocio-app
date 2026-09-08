@@ -508,6 +508,25 @@ function NavInferior({ pantalla, ir, alertas }) {
   );
 }
 
+const DISPARADORES_NAVEGACION = ["llevame", "lleva", "abre", "abrir", "ir a", "vamos a", "muestrame", "ve a", "entra a", "quiero ver", "quiero ir"];
+const DESTINOS_NAVEGACION = [
+  { id: "ingresos", label: "Ingresos", claves: ["ingreso", "venta"] },
+  { id: "compras", label: "Compras", claves: ["compra"] },
+  { id: "gastos", label: "Gastos", claves: ["gasto"] },
+  { id: "inventario", label: "Inventario", claves: ["inventario", "producto"] },
+  { id: "reportes", label: "Reportes", claves: ["reporte", "informe"] },
+];
+// Compara por PALABRA completa (o su plural), no por fragmento de texto — evita
+// falsos positivos como "inventario", que contiene "venta" escondida adentro.
+function contienePalabra(texto, palabra) {
+  return texto.split(/\s+/).some((w) => w === palabra || w.startsWith(palabra));
+}
+function detectarNavegacion(texto) {
+  const t = normalizar(texto);
+  if (!DISPARADORES_NAVEGACION.some((d) => t.includes(d))) return null;
+  return DESTINOS_NAVEGACION.find((d) => d.claves.some((c) => contienePalabra(t, c))) || null;
+}
+
 function Inicio({ productos, stockBajo, ir, perfil }) {
   const totalStock = productos.reduce((s, p) => s + p.stock, 0);
   const tiles = [
@@ -519,12 +538,17 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
   ];
 
   const procesarConsulta = async (texto) => {
+    const destino = detectarNavegacion(texto);
+    if (destino) {
+      setTimeout(() => ir(destino.id), 700);
+      return `Abriendo ${destino.label}…`;
+    }
     const t = normalizar(texto);
     await new Promise((r) => setTimeout(r, 350));
     if (t.includes("stock") || t.includes("inventario")) return `Tienes ${totalStock} unidades en inventario.`;
     if (t.includes("alerta")) return `${stockBajo.length} producto(s) con stock bajo.`;
     if (t.includes("ganancia") || t.includes("utilidad") || t.includes("gasto")) return "Entra a Reportes para ver tu utilidad y tus gastos.";
-    return "Puedo ayudarte con ventas, compras, gastos, inventario o reportes.";
+    return "Puedo llevarte a un módulo (di 'llévame a compras') o responder cuánto stock o alertas tienes.";
   };
 
   return (
@@ -548,7 +572,7 @@ function Inicio({ productos, stockBajo, ir, perfil }) {
         ))}
       </div>
 
-      <AsistenteVoz placeholder="Toca y dime qué necesitas registrar o consultar" onTexto={procesarConsulta} />
+      <AsistenteVoz placeholder='Ej: "llévame a compras" o "¿cuánto stock tengo?"' onTexto={procesarConsulta} />
     </div>
   );
 }
